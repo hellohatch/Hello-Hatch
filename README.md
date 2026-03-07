@@ -55,6 +55,12 @@ API base URL:
     - Leadership Load Index dimension scores
     - LSI overall average
     - Leadership Load Index overall average
+- `POST /assessments/submit`
+  - Persists a scored assessment (`participant_id`, `organization_id`, responses, optional Q35 context).
+- `GET /assessments/{id}`
+  - Returns a persisted assessment record with raw responses and computed scores.
+- `GET /assessments/{id}/trend`
+  - Compares assessment with prior submission for that participant and returns trend signal.
 
 ## Quick verification
 

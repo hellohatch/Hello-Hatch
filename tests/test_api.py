@@ -1,12 +1,15 @@
 import pytest
 import httpx
+from pathlib import Path
 
 from backend.app import main
 
 
-def setup_function() -> None:
+@pytest.fixture(autouse=True)
+def reset_state(tmp_path: Path) -> None:
     main._signals.clear()
     main._next_signal_id = 1
+    main.configure_database(str(tmp_path / "assessments_test.db"))
 
 
 @pytest.fixture
@@ -174,3 +177,96 @@ async def test_assessment_score_rejects_invalid_scale_value() -> None:
         response = await client.post("/assessments/score", json={"responses": responses})
 
     assert response.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_assessment_submit_and_get_returns_persisted_record() -> None:
+    responses = {q: 3 for q in range(1, 35)}
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://test",
+    ) as client:
+        submit_response = await client.post(
+            "/assessments/submit",
+            json={
+                "participant_id": "leader-1",
+                "organization_id": "org-42",
+                "responses": responses,
+                "leadership_complexity_outlook_90_days": "increase",
+            },
+        )
+        assert submit_response.status_code == 201
+        assessment_id = submit_response.json()["id"]
+        get_response = await client.get(f"/assessments/{assessment_id}")
+
+    assert get_response.status_code == 200
+    payload = get_response.json()
+    assert payload["participant_id"] == "leader-1"
+    assert payload["organization_id"] == "org-42"
+    assert len(payload["responses"]) == 34
+    assert payload["lsi_overall"] == 3.0
+    assert payload["leadership_load_index_overall"] == 3.0
+    assert payload["leadership_complexity_outlook_90_days"] == "increase"
+
+
+@pytest.mark.anyio
+async def test_assessment_trend_returns_improving_capacity_signal() -> None:
+    first = {q: 3 for q in range(1, 35)}
+    second = {q: 4 for q in range(1, 25)}
+    second.update({q: 2 for q in range(25, 35)})
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://test",
+    ) as client:
+        first_response = await client.post(
+            "/assessments/submit",
+            json={"participant_id": "leader-trend", "responses": first},
+        )
+        assert first_response.status_code == 201
+        first_id = first_response.json()["id"]
+
+        second_response = await client.post(
+            "/assessments/submit",
+            json={
+                "participant_id": "leader-trend",
+                "responses": second,
+                "leadership_complexity_outlook_90_days": "decrease",
+            },
+        )
+        assert second_response.status_code == 201
+        second_id = second_response.json()["id"]
+
+        trend_response = await client.get(f"/assessments/{second_id}/trend")
+
+    assert trend_response.status_code == 200
+    trend = trend_response.json()
+    assert trend["assessment_id"] == second_id
+    assert trend["baseline_assessment_id"] == first_id
+    assert trend["prediction_signal"] == "improving_capacity"
+    assert trend["lsi_overall_change"] == 1.0
+    assert trend["leadership_load_index_overall_change"] == -1.0
+    assert trend["complexity_outlook_90_days"] == "decrease"
+
+
+@pytest.mark.anyio
+async def test_assessment_trend_handles_missing_history() -> None:
+    responses = {q: 3 for q in range(1, 35)}
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://test",
+    ) as client:
+        submit_response = await client.post(
+            "/assessments/submit",
+            json={"responses": responses},
+        )
+        assert submit_response.status_code == 201
+        assessment_id = submit_response.json()["id"]
+        trend_response = await client.get(f"/assessments/{assessment_id}/trend")
+
+    assert trend_response.status_code == 200
+    trend = trend_response.json()
+    assert trend["prediction_signal"] == "insufficient_history"
+    assert trend["baseline_assessment_id"] is None

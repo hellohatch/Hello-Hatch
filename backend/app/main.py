@@ -1,13 +1,18 @@
 from collections.abc import Sequence
+from datetime import datetime, timezone
 from enum import Enum
+import json
+import sqlite3
+from pathlib import Path
 
-from fastapi import FastAPI, status
+from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field, model_validator
 
 app = FastAPI(title="Leadership Signal Intelligence Platform API")
 
 _signals: list["Signal"] = []
 _next_signal_id = 1
+_default_db_path = Path(__file__).resolve().parents[2] / "database" / "assessments.db"
 
 LIKERT_SCALE: dict[int, str] = {
     1: "Rarely true for me",
@@ -284,8 +289,280 @@ class AssessmentScoreResponse(BaseModel):
     leadership_complexity_outlook_90_days: LeadershipComplexityOutlook | None = None
 
 
+class AssessmentSubmitRequest(AssessmentSubmission):
+    participant_id: str | None = Field(default=None, max_length=120)
+    organization_id: str | None = Field(default=None, max_length=120)
+
+
+class AssessmentRecord(AssessmentScoreResponse):
+    id: int
+    participant_id: str | None = None
+    organization_id: str | None = None
+    created_at: str
+    responses: dict[int, int]
+
+
+class AssessmentTrendResponse(BaseModel):
+    assessment_id: int
+    participant_id: str | None = None
+    organization_id: str | None = None
+    created_at: str
+    baseline_assessment_id: int | None = None
+    days_between: int | None = None
+    lsi_overall_change: float | None = None
+    leadership_load_index_overall_change: float | None = None
+    complexity_outlook_90_days: LeadershipComplexityOutlook | None = None
+    prediction_signal: str
+    interpretation: str
+
+
 def _average(responses: dict[int, int], question_numbers: Sequence[int]) -> float:
     return round(sum(responses[q] for q in question_numbers) / len(question_numbers), 2)
+
+
+def _compute_assessment_scores(payload: AssessmentSubmission) -> AssessmentScoreResponse:
+    lsi_domains = {
+        domain: _average(payload.responses, questions)
+        for domain, questions in LSI_DOMAIN_QUESTION_MAP.items()
+    }
+    load_dimensions = {
+        dimension: _average(payload.responses, questions)
+        for dimension, questions in LEADERSHIP_LOAD_QUESTION_MAP.items()
+    }
+
+    return AssessmentScoreResponse(
+        lsi_domains=lsi_domains,
+        leadership_load_index_dimensions=load_dimensions,
+        lsi_overall=round(sum(lsi_domains.values()) / len(lsi_domains), 2),
+        leadership_load_index_overall=round(
+            sum(load_dimensions.values()) / len(load_dimensions), 2
+        ),
+        leadership_complexity_outlook_90_days=payload.leadership_complexity_outlook_90_days,
+    )
+
+
+def _current_db_path() -> str:
+    return app.state.db_path
+
+
+def _get_db_connection() -> sqlite3.Connection:
+    connection = sqlite3.connect(_current_db_path())
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def configure_database(db_path: str) -> None:
+    db_file = Path(db_path)
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+    app.state.db_path = str(db_file)
+    with _get_db_connection() as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS assessments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                participant_id TEXT,
+                organization_id TEXT,
+                responses_json TEXT NOT NULL,
+                leadership_complexity_outlook_90_days TEXT,
+                lsi_domains_json TEXT NOT NULL,
+                leadership_load_index_dimensions_json TEXT NOT NULL,
+                lsi_overall REAL NOT NULL,
+                leadership_load_index_overall REAL NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_assessments_participant_id
+            ON assessments (participant_id, id)
+            """
+        )
+
+
+def _row_to_assessment_record(row: sqlite3.Row) -> AssessmentRecord:
+    responses = {int(k): v for k, v in json.loads(row["responses_json"]).items()}
+    lsi_domains = {k: float(v) for k, v in json.loads(row["lsi_domains_json"]).items()}
+    load_dimensions = {
+        k: float(v)
+        for k, v in json.loads(row["leadership_load_index_dimensions_json"]).items()
+    }
+    outlook_value = row["leadership_complexity_outlook_90_days"]
+    outlook = (
+        LeadershipComplexityOutlook(outlook_value) if outlook_value is not None else None
+    )
+    return AssessmentRecord(
+        id=int(row["id"]),
+        participant_id=row["participant_id"],
+        organization_id=row["organization_id"],
+        created_at=row["created_at"],
+        responses=responses,
+        lsi_domains=lsi_domains,
+        leadership_load_index_dimensions=load_dimensions,
+        lsi_overall=float(row["lsi_overall"]),
+        leadership_load_index_overall=float(row["leadership_load_index_overall"]),
+        leadership_complexity_outlook_90_days=outlook,
+    )
+
+
+def _fetch_assessment_record(assessment_id: int) -> AssessmentRecord | None:
+    with _get_db_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT
+                id,
+                participant_id,
+                organization_id,
+                responses_json,
+                leadership_complexity_outlook_90_days,
+                lsi_domains_json,
+                leadership_load_index_dimensions_json,
+                lsi_overall,
+                leadership_load_index_overall,
+                created_at
+            FROM assessments
+            WHERE id = ?
+            """,
+            (assessment_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return _row_to_assessment_record(row)
+
+
+def _fetch_previous_assessment_record(
+    participant_id: str, assessment_id: int
+) -> AssessmentRecord | None:
+    with _get_db_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT
+                id,
+                participant_id,
+                organization_id,
+                responses_json,
+                leadership_complexity_outlook_90_days,
+                lsi_domains_json,
+                leadership_load_index_dimensions_json,
+                lsi_overall,
+                leadership_load_index_overall,
+                created_at
+            FROM assessments
+            WHERE participant_id = ? AND id < ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (participant_id, assessment_id),
+        ).fetchone()
+    if row is None:
+        return None
+    return _row_to_assessment_record(row)
+
+
+def _store_assessment(
+    payload: AssessmentSubmitRequest, score: AssessmentScoreResponse
+) -> AssessmentRecord:
+    created_at = datetime.now(timezone.utc).isoformat()
+    with _get_db_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO assessments (
+                participant_id,
+                organization_id,
+                responses_json,
+                leadership_complexity_outlook_90_days,
+                lsi_domains_json,
+                leadership_load_index_dimensions_json,
+                lsi_overall,
+                leadership_load_index_overall,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                payload.participant_id,
+                payload.organization_id,
+                json.dumps(payload.responses),
+                (
+                    payload.leadership_complexity_outlook_90_days.value
+                    if payload.leadership_complexity_outlook_90_days is not None
+                    else None
+                ),
+                json.dumps(score.lsi_domains),
+                json.dumps(score.leadership_load_index_dimensions),
+                score.lsi_overall,
+                score.leadership_load_index_overall,
+                created_at,
+            ),
+        )
+        new_id = cursor.lastrowid
+    record = _fetch_assessment_record(int(new_id))
+    if record is None:
+        raise RuntimeError("assessment insert succeeded but record could not be loaded")
+    return record
+
+
+def _derive_trend_signal(
+    current: AssessmentRecord, baseline: AssessmentRecord | None
+) -> AssessmentTrendResponse:
+    if current.participant_id is None:
+        return AssessmentTrendResponse(
+            assessment_id=current.id,
+            participant_id=current.participant_id,
+            organization_id=current.organization_id,
+            created_at=current.created_at,
+            complexity_outlook_90_days=current.leadership_complexity_outlook_90_days,
+            prediction_signal="insufficient_history",
+            interpretation="Trend modeling requires participant_id on submissions.",
+        )
+
+    if baseline is None:
+        return AssessmentTrendResponse(
+            assessment_id=current.id,
+            participant_id=current.participant_id,
+            organization_id=current.organization_id,
+            created_at=current.created_at,
+            complexity_outlook_90_days=current.leadership_complexity_outlook_90_days,
+            prediction_signal="insufficient_history",
+            interpretation="A prior assessment for this participant is required.",
+        )
+
+    lsi_change = round(current.lsi_overall - baseline.lsi_overall, 2)
+    load_change = round(
+        current.leadership_load_index_overall - baseline.leadership_load_index_overall, 2
+    )
+    current_ts = datetime.fromisoformat(current.created_at)
+    baseline_ts = datetime.fromisoformat(baseline.created_at)
+    days_between = max(0, (current_ts - baseline_ts).days)
+
+    signal = "mixed_signal"
+    interpretation = "LSI and Load moved in different directions; monitor trend with next pulse."
+    if abs(lsi_change) <= 0.25 and abs(load_change) <= 0.25:
+        signal = "stability_watch"
+        interpretation = "Profile is stable; next pulse confirms if this remains steady."
+    elif lsi_change >= 0.5 and load_change <= -0.5:
+        signal = "improving_capacity"
+        interpretation = "Capacity trend is improving (higher LSI with lower Load)."
+    elif lsi_change <= -0.5 and load_change >= 0.5:
+        signal = "rising_strain"
+        interpretation = "Strain trend is rising (lower LSI with higher Load)."
+
+    return AssessmentTrendResponse(
+        assessment_id=current.id,
+        participant_id=current.participant_id,
+        organization_id=current.organization_id,
+        created_at=current.created_at,
+        baseline_assessment_id=baseline.id,
+        days_between=days_between,
+        lsi_overall_change=lsi_change,
+        leadership_load_index_overall_change=load_change,
+        complexity_outlook_90_days=current.leadership_complexity_outlook_90_days,
+        prediction_signal=signal,
+        interpretation=interpretation,
+    )
+
+
+configure_database(str(_default_db_path))
 
 
 @app.get("/health")
@@ -333,21 +610,38 @@ async def get_assessment_template() -> AssessmentTemplate:
 
 @app.post("/assessments/score", response_model=AssessmentScoreResponse)
 async def score_assessment(payload: AssessmentSubmission) -> AssessmentScoreResponse:
-    lsi_domains = {
-        domain: _average(payload.responses, questions)
-        for domain, questions in LSI_DOMAIN_QUESTION_MAP.items()
-    }
-    load_dimensions = {
-        dimension: _average(payload.responses, questions)
-        for dimension, questions in LEADERSHIP_LOAD_QUESTION_MAP.items()
-    }
+    return _compute_assessment_scores(payload)
 
-    return AssessmentScoreResponse(
-        lsi_domains=lsi_domains,
-        leadership_load_index_dimensions=load_dimensions,
-        lsi_overall=round(sum(lsi_domains.values()) / len(lsi_domains), 2),
-        leadership_load_index_overall=round(
-            sum(load_dimensions.values()) / len(load_dimensions), 2
-        ),
-        leadership_complexity_outlook_90_days=payload.leadership_complexity_outlook_90_days,
-    )
+
+@app.post(
+    "/assessments/submit",
+    response_model=AssessmentRecord,
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_assessment(payload: AssessmentSubmitRequest) -> AssessmentRecord:
+    score = _compute_assessment_scores(payload)
+    return _store_assessment(payload, score)
+
+
+@app.get("/assessments/{assessment_id}", response_model=AssessmentRecord)
+async def get_assessment(assessment_id: int) -> AssessmentRecord:
+    record = _fetch_assessment_record(assessment_id)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="assessment not found"
+        )
+    return record
+
+
+@app.get("/assessments/{assessment_id}/trend", response_model=AssessmentTrendResponse)
+async def get_assessment_trend(assessment_id: int) -> AssessmentTrendResponse:
+    current = _fetch_assessment_record(assessment_id)
+    if current is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="assessment not found"
+        )
+
+    baseline = None
+    if current.participant_id is not None:
+        baseline = _fetch_previous_assessment_record(current.participant_id, assessment_id)
+    return _derive_trend_signal(current, baseline)
