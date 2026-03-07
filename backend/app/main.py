@@ -1,12 +1,214 @@
 from collections.abc import Sequence
+from enum import Enum
 
 from fastapi import FastAPI, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 app = FastAPI(title="Leadership Signal Intelligence Platform API")
 
 _signals: list["Signal"] = []
 _next_signal_id = 1
+
+LIKERT_SCALE: dict[int, str] = {
+    1: "Rarely true for me",
+    2: "Occasionally true for me",
+    3: "Sometimes true for me",
+    4: "Often true for me",
+    5: "Consistently true for me",
+}
+
+LSI_DOMAIN_QUESTION_MAP: dict[str, list[int]] = {
+    "Operational Stability": [1, 2, 3, 4],
+    "Cognitive Breadth": [5, 6, 7, 8],
+    "Trust Climate": [9, 10, 11, 12],
+    "Ethical Integrity": [13, 14, 15, 16],
+    "Leadership Durability": [17, 18, 19, 20],
+    "Adaptive Capacity": [21, 22, 23, 24],
+}
+
+LEADERSHIP_LOAD_QUESTION_MAP: dict[str, list[int]] = {
+    "Decision Volume": [25, 26],
+    "Interpretive Demand": [27, 28],
+    "Strategic Complexity": [29, 30],
+    "Leadership Span Pressure": [31, 32],
+    "Cognitive Carryover": [33, 34],
+}
+
+SECTION_1_QUESTIONS: list[tuple[int, str, str]] = [
+    (
+        1,
+        "Operational Stability",
+        "When multiple priorities compete for attention, I remain calm and deliberate in how I approach decisions.",
+    ),
+    (
+        2,
+        "Operational Stability",
+        "Even during demanding periods, I am able to think clearly before responding to complex issues.",
+    ),
+    (
+        3,
+        "Operational Stability",
+        "When pressure increases, I avoid reacting impulsively and instead pause to consider the broader implications.",
+    ),
+    (
+        4,
+        "Operational Stability",
+        "People around me experience my leadership as steady even when situations become complicated.",
+    ),
+    (
+        5,
+        "Cognitive Breadth",
+        "Before committing to a decision, I intentionally explore several possible approaches.",
+    ),
+    (
+        6,
+        "Cognitive Breadth",
+        "I actively seek perspectives that challenge my initial assumptions.",
+    ),
+    (
+        7,
+        "Cognitive Breadth",
+        "In strategic conversations, I encourage discussion of alternative solutions before selecting a path forward.",
+    ),
+    (
+        8,
+        "Cognitive Breadth",
+        "When evaluating options, I consider both short term outcomes and long term consequences.",
+    ),
+    (
+        9,
+        "Trust Climate",
+        "Members of my team feel comfortable raising concerns or offering differing perspectives.",
+    ),
+    (
+        10,
+        "Trust Climate",
+        "During discussions, I encourage people to speak candidly even when their views differ from mine.",
+    ),
+    (
+        11,
+        "Trust Climate",
+        "I make an effort to ensure that quieter voices are included in important conversations.",
+    ),
+    (
+        12,
+        "Trust Climate",
+        "When someone challenges an idea, I focus on understanding their reasoning rather than defending my position.",
+    ),
+    (
+        13,
+        "Ethical Integrity",
+        "I maintain consistent standards for how decisions should be made, even under pressure.",
+    ),
+    (
+        14,
+        "Ethical Integrity",
+        "When facing difficult tradeoffs, I prioritize what is right for the organization rather than what is easiest in the moment.",
+    ),
+    (
+        15,
+        "Ethical Integrity",
+        "People around me understand the principles that guide my decisions.",
+    ),
+    (
+        16,
+        "Ethical Integrity",
+        "I am willing to delay action if a decision does not align with my standards.",
+    ),
+    (
+        17,
+        "Leadership Durability",
+        "My leadership pace feels sustainable across repeated cycles of demand.",
+    ),
+    (
+        18,
+        "Leadership Durability",
+        "Even during busy periods, I maintain enough mental space to think strategically.",
+    ),
+    (
+        19,
+        "Leadership Durability",
+        "I am able to recover mentally between demanding conversations or major decisions.",
+    ),
+    (
+        20,
+        "Leadership Durability",
+        "The volume of decisions requiring my input does not consistently feel overwhelming.",
+    ),
+    (
+        21,
+        "Adaptive Capacity",
+        "When circumstances change, I am able to adjust direction without creating confusion for the team.",
+    ),
+    (
+        22,
+        "Adaptive Capacity",
+        "I remain open to new information that may alter the course of a decision.",
+    ),
+    (
+        23,
+        "Adaptive Capacity",
+        "I help others interpret unexpected developments in a constructive way.",
+    ),
+    (
+        24,
+        "Adaptive Capacity",
+        "When plans change, I focus on helping the organization move forward rather than defending previous decisions.",
+    ),
+]
+
+SECTION_2_QUESTIONS: list[tuple[int, str, str]] = [
+    (
+        25,
+        "Decision Volume",
+        "A significant number of high impact decisions require my involvement each week.",
+    ),
+    (
+        26,
+        "Decision Volume",
+        "Teams frequently seek my perspective before moving forward with important issues.",
+    ),
+    (
+        27,
+        "Interpretive Demand",
+        "Colleagues often ask for my input when they are unsure how to approach a complex situation.",
+    ),
+    (
+        28,
+        "Interpretive Demand",
+        "I am frequently asked to help resolve ambiguity between teams or priorities.",
+    ),
+    (
+        29,
+        "Strategic Complexity",
+        "I am currently managing several initiatives that influence multiple parts of the organization.",
+    ),
+    (
+        30,
+        "Strategic Complexity",
+        "Many of the decisions I participate in have consequences across multiple teams or functions.",
+    ),
+    (
+        31,
+        "Leadership Span Pressure",
+        "Several leaders depend on my guidance to move forward with their own decisions.",
+    ),
+    (
+        32,
+        "Leadership Span Pressure",
+        "I am often involved in conversations that affect teams beyond my direct reporting structure.",
+    ),
+    (
+        33,
+        "Cognitive Carryover",
+        "I often continue thinking about work related decisions outside normal working hours.",
+    ),
+    (
+        34,
+        "Cognitive Carryover",
+        "Major decisions frequently remain on my mind after the workday ends.",
+    ),
+]
 
 
 class SignalCreate(BaseModel):
@@ -20,6 +222,70 @@ class Signal(BaseModel):
     title: str
     source: str | None = None
     summary: str | None = None
+
+
+class LeadershipComplexityOutlook(str, Enum):
+    decrease = "decrease"
+    stay_about_the_same = "stay_about_the_same"
+    increase = "increase"
+
+
+class AssessmentQuestion(BaseModel):
+    number: int
+    domain: str
+    text: str
+    options: list[str] | None = None
+
+
+class AssessmentTemplate(BaseModel):
+    scale: dict[int, str]
+    section_1: list[AssessmentQuestion]
+    section_2: list[AssessmentQuestion]
+    context_question_35: AssessmentQuestion
+    lsi_domain_map: dict[str, list[int]]
+    leadership_load_map: dict[str, list[int]]
+
+
+class AssessmentSubmission(BaseModel):
+    responses: dict[int, int]
+    leadership_complexity_outlook_90_days: LeadershipComplexityOutlook | None = None
+
+    @model_validator(mode="after")
+    def validate_responses(self) -> "AssessmentSubmission":
+        expected = set(range(1, 35))
+        received = set(self.responses.keys())
+        missing = sorted(expected - received)
+        extra = sorted(received - expected)
+
+        if missing or extra:
+            details: list[str] = []
+            if missing:
+                details.append(f"missing questions: {missing}")
+            if extra:
+                details.append(f"unexpected questions: {extra}")
+            raise ValueError(", ".join(details))
+
+        invalid_scores = sorted(
+            q_num for q_num, score in self.responses.items() if score not in LIKERT_SCALE
+        )
+        if invalid_scores:
+            raise ValueError(
+                f"invalid score for questions {invalid_scores}; allowed scale is 1-5"
+            )
+
+        return self
+
+
+class AssessmentScoreResponse(BaseModel):
+    lsi_domains: dict[str, float]
+    leadership_load_index_dimensions: dict[str, float]
+    lsi_overall: float
+    leadership_load_index_overall: float
+    leadership_complexity_outlook_90_days: LeadershipComplexityOutlook | None = None
+
+
+def _average(responses: dict[int, int], question_numbers: Sequence[int]) -> float:
+    return round(sum(responses[q] for q in question_numbers) / len(question_numbers), 2)
 
 
 @app.get("/health")
@@ -40,3 +306,48 @@ async def create_signal(payload: SignalCreate) -> Signal:
 @app.get("/signals", response_model=list[Signal])
 async def list_signals() -> Sequence[Signal]:
     return _signals
+
+
+@app.get("/assessments/template", response_model=AssessmentTemplate)
+async def get_assessment_template() -> AssessmentTemplate:
+    return AssessmentTemplate(
+        scale=LIKERT_SCALE,
+        section_1=[
+            AssessmentQuestion(number=num, domain=domain, text=text)
+            for num, domain, text in SECTION_1_QUESTIONS
+        ],
+        section_2=[
+            AssessmentQuestion(number=num, domain=domain, text=text)
+            for num, domain, text in SECTION_2_QUESTIONS
+        ],
+        context_question_35=AssessmentQuestion(
+            number=35,
+            domain="Context",
+            text="Over the next 90 days, do you expect the complexity of your leadership role to:",
+            options=["Decrease", "Stay about the same", "Increase"],
+        ),
+        lsi_domain_map=LSI_DOMAIN_QUESTION_MAP,
+        leadership_load_map=LEADERSHIP_LOAD_QUESTION_MAP,
+    )
+
+
+@app.post("/assessments/score", response_model=AssessmentScoreResponse)
+async def score_assessment(payload: AssessmentSubmission) -> AssessmentScoreResponse:
+    lsi_domains = {
+        domain: _average(payload.responses, questions)
+        for domain, questions in LSI_DOMAIN_QUESTION_MAP.items()
+    }
+    load_dimensions = {
+        dimension: _average(payload.responses, questions)
+        for dimension, questions in LEADERSHIP_LOAD_QUESTION_MAP.items()
+    }
+
+    return AssessmentScoreResponse(
+        lsi_domains=lsi_domains,
+        leadership_load_index_dimensions=load_dimensions,
+        lsi_overall=round(sum(lsi_domains.values()) / len(lsi_domains), 2),
+        leadership_load_index_overall=round(
+            sum(load_dimensions.values()) / len(load_dimensions), 2
+        ),
+        leadership_complexity_outlook_90_days=payload.leadership_complexity_outlook_90_days,
+    )
