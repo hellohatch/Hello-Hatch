@@ -1,0 +1,1 @@
+{"mcpServers": {"hellohatch-platform": {"command": "python", "args": ["mcp_server.py"], "env": {"PYTHONUNBUFFERED": "1"}}}}}
