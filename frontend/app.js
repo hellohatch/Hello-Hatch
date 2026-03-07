@@ -16,6 +16,22 @@ const overallSummary = document.getElementById("overall-summary");
 const trendSummary = document.getElementById("trend-summary");
 const lsiTable = document.getElementById("lsi-table");
 const loadTable = document.getElementById("load-table");
+const assessmentView = document.getElementById("assessment-view");
+const dashboardView = document.getElementById("dashboard-view");
+const viewAssessmentButton = document.getElementById("view-assessment-button");
+const viewDashboardButton = document.getElementById("view-dashboard-button");
+const dashboardOrganizationInput = document.getElementById("dashboard-organization-id");
+const dashboardParticipantInput = document.getElementById("dashboard-participant-id");
+const dashboardDaysInput = document.getElementById("dashboard-days");
+const dashboardRefreshButton = document.getElementById("dashboard-refresh-button");
+const dashboardStatus = document.getElementById("dashboard-status");
+const dashboardCards = document.getElementById("dashboard-cards");
+const dashboardSignalCounts = document.getElementById("dashboard-signal-counts");
+const dashboardOutlookCounts = document.getElementById("dashboard-outlook-counts");
+const dashboardChart = document.getElementById("dashboard-chart");
+const dashboardSignalsTableBody = document.querySelector(
+  "#dashboard-signals-table tbody",
+);
 
 let template = null;
 
@@ -151,6 +167,205 @@ function renderList(container, items) {
   });
 }
 
+function setDashboardStatus(text, tone = "idle") {
+  dashboardStatus.textContent = text;
+  dashboardStatus.className = `status ${tone}`;
+}
+
+function setActiveView(view) {
+  const dashboardActive = view === "dashboard";
+  dashboardView.hidden = !dashboardActive;
+  assessmentView.hidden = dashboardActive;
+  viewDashboardButton.classList.toggle("active", dashboardActive);
+  viewAssessmentButton.classList.toggle("active", !dashboardActive);
+}
+
+function createCard(label, value) {
+  const card = document.createElement("article");
+  card.className = "dashboard-card";
+  const title = document.createElement("h4");
+  title.textContent = label;
+  const number = document.createElement("p");
+  number.textContent = value;
+  card.appendChild(title);
+  card.appendChild(number);
+  return card;
+}
+
+function toDisplay(value) {
+  if (value === null || value === undefined) return "n/a";
+  if (typeof value === "number") return value.toFixed(2);
+  return String(value);
+}
+
+function renderDashboardCards(summary) {
+  dashboardCards.innerHTML = "";
+  const cards = [
+    createCard("Total assessments", String(summary.total_assessments)),
+    createCard("Unique participants", String(summary.unique_participants)),
+    createCard("Avg LSI overall", toDisplay(summary.avg_lsi_overall)),
+    createCard(
+      "Avg Leadership Load",
+      toDisplay(summary.avg_leadership_load_overall),
+    ),
+  ];
+  cards.forEach((card) => dashboardCards.appendChild(card));
+}
+
+function renderCountList(container, objectValues, emptyText) {
+  const entries = Object.entries(objectValues ?? {});
+  if (entries.length === 0) {
+    renderList(container, [emptyText]);
+    return;
+  }
+  renderList(
+    container,
+    entries
+      .sort((a, b) => b[1] - a[1])
+      .map(([key, value]) => `${key}: ${value}`),
+  );
+}
+
+function renderDashboardChart(points) {
+  dashboardChart.innerHTML = "";
+  if (!points || points.length === 0) {
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute("x", "24");
+    text.setAttribute("y", "40");
+    text.setAttribute("class", "dashboard-chart-label");
+    text.textContent = "No data for current filters.";
+    dashboardChart.appendChild(text);
+    return;
+  }
+
+  const width = 900;
+  const height = 260;
+  const padLeft = 48;
+  const padRight = 20;
+  const padTop = 20;
+  const padBottom = 35;
+  const plotWidth = width - padLeft - padRight;
+  const plotHeight = height - padTop - padBottom;
+
+  const toX = (idx) =>
+    padLeft + (points.length === 1 ? plotWidth / 2 : (idx / (points.length - 1)) * plotWidth);
+  const toY = (score) => padTop + ((5 - score) / 4) * plotHeight;
+
+  const lineLsi = points.map((p, idx) => `${toX(idx)},${toY(p.lsi_overall)}`).join(" ");
+  const lineLoad = points
+    .map((p, idx) => `${toX(idx)},${toY(p.leadership_load_index_overall)}`)
+    .join(" ");
+
+  const axis = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  axis.setAttribute("x1", String(padLeft));
+  axis.setAttribute("y1", String(height - padBottom));
+  axis.setAttribute("x2", String(width - padRight));
+  axis.setAttribute("y2", String(height - padBottom));
+  axis.setAttribute("stroke", "#cfdbe8");
+  axis.setAttribute("stroke-width", "1");
+  dashboardChart.appendChild(axis);
+
+  const lsiPath = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+  lsiPath.setAttribute("points", lineLsi);
+  lsiPath.setAttribute("fill", "none");
+  lsiPath.setAttribute("stroke", "#2463eb");
+  lsiPath.setAttribute("stroke-width", "3");
+  dashboardChart.appendChild(lsiPath);
+
+  const loadPath = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+  loadPath.setAttribute("points", lineLoad);
+  loadPath.setAttribute("fill", "none");
+  loadPath.setAttribute("stroke", "#d65353");
+  loadPath.setAttribute("stroke-width", "3");
+  dashboardChart.appendChild(loadPath);
+
+  const legendLsi = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  legendLsi.setAttribute("x", String(padLeft));
+  legendLsi.setAttribute("y", "14");
+  legendLsi.setAttribute("class", "dashboard-chart-label");
+  legendLsi.textContent = "Blue: LSI overall";
+  dashboardChart.appendChild(legendLsi);
+
+  const legendLoad = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  legendLoad.setAttribute("x", "190");
+  legendLoad.setAttribute("y", "14");
+  legendLoad.setAttribute("class", "dashboard-chart-label");
+  legendLoad.textContent = "Red: Leadership Load overall";
+  dashboardChart.appendChild(legendLoad);
+}
+
+function renderDashboardSignals(items) {
+  dashboardSignalsTableBody.innerHTML = "";
+  if (!items || items.length === 0) {
+    const row = document.createElement("tr");
+    row.innerHTML = '<td colspan="8">No participant signal records for current filters.</td>';
+    dashboardSignalsTableBody.appendChild(row);
+    return;
+  }
+
+  items.forEach((item) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${item.participant_id}</td>
+      <td>${item.assessment_id}</td>
+      <td>${item.prediction_signal}</td>
+      <td>${toDisplay(item.lsi_overall)}</td>
+      <td>${toDisplay(item.leadership_load_index_overall)}</td>
+      <td>${toDisplay(item.lsi_overall_change)}</td>
+      <td>${toDisplay(item.leadership_load_index_overall_change)}</td>
+      <td>${item.created_at}</td>
+    `;
+    dashboardSignalsTableBody.appendChild(row);
+  });
+}
+
+function dashboardQueryString() {
+  const params = new URLSearchParams();
+  const org = dashboardOrganizationInput.value.trim();
+  const participant = dashboardParticipantInput.value.trim();
+  const days = Number(dashboardDaysInput.value || "90");
+
+  if (org) params.set("organization_id", org);
+  if (participant) params.set("participant_id", participant);
+  params.set("days", String(Number.isFinite(days) && days > 0 ? days : 90));
+  return params.toString();
+}
+
+async function loadDashboard() {
+  setDashboardStatus("Loading dashboard...", "idle");
+  const query = dashboardQueryString();
+  const [summaryRes, seriesRes, signalsRes] = await Promise.all([
+    fetch(`/dashboard/summary?${query}`),
+    fetch(`/dashboard/timeseries?${query}`),
+    fetch(`/dashboard/signals?${query}`),
+  ]);
+
+  if (!summaryRes.ok || !seriesRes.ok || !signalsRes.ok) {
+    throw new Error(
+      `Dashboard fetch failed (${summaryRes.status}/${seriesRes.status}/${signalsRes.status})`,
+    );
+  }
+
+  const summary = await summaryRes.json();
+  const timeseries = await seriesRes.json();
+  const signals = await signalsRes.json();
+
+  renderDashboardCards(summary);
+  renderCountList(
+    dashboardSignalCounts,
+    summary.signal_counts,
+    "No signal counts for current filters.",
+  );
+  renderCountList(
+    dashboardOutlookCounts,
+    summary.complexity_outlook_distribution,
+    "No Q35 outlook values for current filters.",
+  );
+  renderDashboardChart(timeseries.points);
+  renderDashboardSignals(signals.items);
+  setDashboardStatus("Dashboard updated.", "success");
+}
+
 function renderResults(record, trend) {
   renderList(recordSummary, [
     `Assessment ID: ${record.id}`,
@@ -240,6 +455,9 @@ async function handleSubmit(event) {
     const trend = await trendResponse.json();
     renderResults(record, trend);
     setStatus("Assessment submitted and scored successfully.", "success");
+    if (!dashboardView.hidden) {
+      await loadDashboard();
+    }
   } catch (error) {
     setStatus(String(error), "error");
   } finally {
@@ -248,6 +466,22 @@ async function handleSubmit(event) {
 }
 
 form.addEventListener("submit", handleSubmit);
+viewAssessmentButton.addEventListener("click", () => setActiveView("assessment"));
+viewDashboardButton.addEventListener("click", async () => {
+  setActiveView("dashboard");
+  try {
+    await loadDashboard();
+  } catch (error) {
+    setDashboardStatus(String(error), "error");
+  }
+});
+dashboardRefreshButton.addEventListener("click", async () => {
+  try {
+    await loadDashboard();
+  } catch (error) {
+    setDashboardStatus(String(error), "error");
+  }
+});
 fillNeutralButton.addEventListener("click", () => {
   fillAllResponses(3);
   setStatus("All responses set to 3 (Sometimes true for me).", "idle");
@@ -256,4 +490,5 @@ clearButton.addEventListener("click", () => {
   clearAllResponses();
   setStatus("All responses cleared.", "idle");
 });
+setActiveView("assessment");
 loadTemplate().catch((error) => setStatus(String(error), "error"));

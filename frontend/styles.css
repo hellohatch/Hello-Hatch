@@ -29,6 +29,12 @@ body {
   color: #3f566f;
 }
 
+.view-toggle {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+
 .panel {
   background: #ffffff;
   border: 1px solid #d9e2ec;
@@ -126,6 +132,18 @@ button.secondary {
   background: #55708f;
 }
 
+button.tab {
+  background: #ffffff;
+  color: #2e4158;
+  border: 1px solid #bfd0e2;
+}
+
+button.tab.active {
+  background: #2463eb;
+  color: #ffffff;
+  border-color: #2463eb;
+}
+
 .status {
   margin: 0;
   font-weight: 600;
@@ -173,4 +191,60 @@ button.secondary {
 .score-table td:last-child {
   text-align: right;
   font-weight: 700;
+}
+
+.dashboard-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.dashboard-card {
+  border: 1px solid #dce5ef;
+  border-radius: 8px;
+  background: #fbfdff;
+  padding: 10px;
+}
+
+.dashboard-card h4 {
+  margin: 0;
+  font-size: 13px;
+  color: #4a6078;
+  font-weight: 700;
+}
+
+.dashboard-card p {
+  margin: 6px 0 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.dashboard-chart {
+  width: 100%;
+  border: 1px solid #dce5ef;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.dashboard-chart-label {
+  font-size: 12px;
+  fill: #506683;
+}
+
+.dashboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.dashboard-table th,
+.dashboard-table td {
+  border-bottom: 1px solid #edf1f5;
+  padding: 7px 6px;
+  text-align: left;
+}
+
+.dashboard-table th {
+  color: #49617a;
 }

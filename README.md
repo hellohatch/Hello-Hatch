@@ -33,6 +33,10 @@ Frontend URL:
 
 `http://127.0.0.1:8000/`
 
+Dashboard:
+
+Use the `Dashboard` tab in the UI at `http://127.0.0.1:8000/`.
+
 ## API endpoints
 
 ### Health
@@ -65,6 +69,19 @@ Frontend URL:
   - Returns a persisted assessment record with raw responses and computed scores.
 - `GET /assessments/{id}/trend`
   - Compares assessment with prior submission for that participant and returns trend signal.
+
+### Dashboard
+
+- `GET /dashboard/summary`
+  - Aggregated KPI metrics (volume, averages, signal counts, Q35 outlook distribution).
+- `GET /dashboard/timeseries`
+  - Ordered LSI/load points for charting over a selected date window.
+- `GET /dashboard/signals`
+  - Latest signal row per participant, including current metrics and deltas.
+  - Supported query params on all dashboard endpoints:
+    - `organization_id` (optional)
+    - `participant_id` (optional)
+    - `days` (optional, defaults vary by endpoint)
 
 ## Quick verification
 

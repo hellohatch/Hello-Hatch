@@ -295,3 +295,111 @@ async def test_assessment_trend_handles_missing_history() -> None:
     trend = trend_response.json()
     assert trend["prediction_signal"] == "insufficient_history"
     assert trend["baseline_assessment_id"] is None
+
+
+@pytest.mark.anyio
+async def test_dashboard_summary_returns_aggregates_for_filters() -> None:
+    responses_a = {q: 4 for q in range(1, 25)}
+    responses_a.update({q: 2 for q in range(25, 35)})
+    responses_b = {q: 2 for q in range(1, 25)}
+    responses_b.update({q: 4 for q in range(25, 35)})
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://test",
+    ) as client:
+        submit_a = await client.post(
+            "/assessments/submit",
+            json={
+                "participant_id": "leader-dashboard",
+                "organization_id": "org-a",
+                "responses": responses_a,
+                "leadership_complexity_outlook_90_days": "increase",
+            },
+        )
+        assert submit_a.status_code == 201
+
+        submit_b = await client.post(
+            "/assessments/submit",
+            json={
+                "participant_id": "leader-dashboard",
+                "organization_id": "org-a",
+                "responses": responses_b,
+                "leadership_complexity_outlook_90_days": "decrease",
+            },
+        )
+        assert submit_b.status_code == 201
+
+        other_org = await client.post(
+            "/assessments/submit",
+            json={
+                "participant_id": "other-leader",
+                "organization_id": "org-b",
+                "responses": {q: 3 for q in range(1, 35)},
+            },
+        )
+        assert other_org.status_code == 201
+
+        summary_response = await client.get("/dashboard/summary?organization_id=org-a")
+
+    assert summary_response.status_code == 200
+    summary = summary_response.json()
+    assert summary["organization_id"] == "org-a"
+    assert summary["total_assessments"] == 2
+    assert summary["unique_participants"] == 1
+    assert summary["avg_lsi_overall"] == 3.0
+    assert summary["avg_leadership_load_overall"] == 3.0
+    assert summary["complexity_outlook_distribution"]["increase"] == 1
+    assert summary["complexity_outlook_distribution"]["decrease"] == 1
+
+
+@pytest.mark.anyio
+async def test_dashboard_timeseries_and_signals_return_expected_shapes() -> None:
+    baseline = {q: 3 for q in range(1, 35)}
+    better = {q: 4 for q in range(1, 25)}
+    better.update({q: 2 for q in range(25, 35)})
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://test",
+    ) as client:
+        first = await client.post(
+            "/assessments/submit",
+            json={
+                "participant_id": "leader-trend-dashboard",
+                "organization_id": "org-dash",
+                "responses": baseline,
+            },
+        )
+        assert first.status_code == 201
+
+        second = await client.post(
+            "/assessments/submit",
+            json={
+                "participant_id": "leader-trend-dashboard",
+                "organization_id": "org-dash",
+                "responses": better,
+                "leadership_complexity_outlook_90_days": "decrease",
+            },
+        )
+        assert second.status_code == 201
+
+        timeseries_response = await client.get(
+            "/dashboard/timeseries?organization_id=org-dash"
+        )
+        signals_response = await client.get("/dashboard/signals?organization_id=org-dash")
+
+    assert timeseries_response.status_code == 200
+    timeseries = timeseries_response.json()
+    assert len(timeseries["points"]) == 2
+    assert timeseries["points"][0]["assessment_id"] == first.json()["id"]
+    assert timeseries["points"][1]["assessment_id"] == second.json()["id"]
+
+    assert signals_response.status_code == 200
+    signals = signals_response.json()
+    assert len(signals["items"]) == 1
+    signal = signals["items"][0]
+    assert signal["participant_id"] == "leader-trend-dashboard"
+    assert signal["prediction_signal"] == "improving_capacity"
+    assert signal["lsi_overall_change"] == 1.0
+    assert signal["leadership_load_index_overall_change"] == -1.0

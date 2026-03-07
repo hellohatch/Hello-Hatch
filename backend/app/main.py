@@ -1,11 +1,11 @@
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import json
 import sqlite3
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
@@ -320,6 +320,55 @@ class AssessmentTrendResponse(BaseModel):
     interpretation: str
 
 
+class DashboardSummaryResponse(BaseModel):
+    organization_id: str | None = None
+    participant_id: str | None = None
+    days: int
+    total_assessments: int
+    unique_participants: int
+    avg_lsi_overall: float | None = None
+    avg_leadership_load_overall: float | None = None
+    signal_counts: dict[str, int]
+    complexity_outlook_distribution: dict[str, int]
+
+
+class DashboardTimeseriesPoint(BaseModel):
+    assessment_id: int
+    created_at: str
+    participant_id: str | None = None
+    organization_id: str | None = None
+    lsi_overall: float
+    leadership_load_index_overall: float
+    prediction_signal: str
+
+
+class DashboardTimeseriesResponse(BaseModel):
+    organization_id: str | None = None
+    participant_id: str | None = None
+    days: int
+    points: list[DashboardTimeseriesPoint]
+
+
+class DashboardSignalEntry(BaseModel):
+    participant_id: str
+    organization_id: str | None = None
+    assessment_id: int
+    created_at: str
+    prediction_signal: str
+    interpretation: str
+    lsi_overall: float
+    leadership_load_index_overall: float
+    lsi_overall_change: float | None = None
+    leadership_load_index_overall_change: float | None = None
+
+
+class DashboardSignalsResponse(BaseModel):
+    organization_id: str | None = None
+    participant_id: str | None = None
+    days: int
+    items: list[DashboardSignalEntry]
+
+
 def _average(responses: dict[int, int], question_numbers: Sequence[int]) -> float:
     return round(sum(responses[q] for q in question_numbers) / len(question_numbers), 2)
 
@@ -506,6 +555,44 @@ def _store_assessment(
     return record
 
 
+def _fetch_filtered_assessment_records(
+    organization_id: str | None,
+    participant_id: str | None,
+    days: int,
+) -> list[AssessmentRecord]:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    where_clauses = ["created_at >= ?"]
+    params: list[str | int] = [cutoff]
+
+    if organization_id is not None:
+        where_clauses.append("organization_id = ?")
+        params.append(organization_id)
+    if participant_id is not None:
+        where_clauses.append("participant_id = ?")
+        params.append(participant_id)
+
+    query = f"""
+        SELECT
+            id,
+            participant_id,
+            organization_id,
+            responses_json,
+            leadership_complexity_outlook_90_days,
+            lsi_domains_json,
+            leadership_load_index_dimensions_json,
+            lsi_overall,
+            leadership_load_index_overall,
+            created_at
+        FROM assessments
+        WHERE {" AND ".join(where_clauses)}
+        ORDER BY id ASC
+    """
+
+    with _get_db_connection() as connection:
+        rows = connection.execute(query, tuple(params)).fetchall()
+    return [_row_to_assessment_record(row) for row in rows]
+
+
 def _derive_trend_signal(
     current: AssessmentRecord, baseline: AssessmentRecord | None
 ) -> AssessmentTrendResponse:
@@ -660,3 +747,135 @@ async def get_assessment_trend(assessment_id: int) -> AssessmentTrendResponse:
     if current.participant_id is not None:
         baseline = _fetch_previous_assessment_record(current.participant_id, assessment_id)
     return _derive_trend_signal(current, baseline)
+
+
+@app.get("/dashboard/summary", response_model=DashboardSummaryResponse)
+async def get_dashboard_summary(
+    organization_id: str | None = Query(default=None, max_length=120),
+    participant_id: str | None = Query(default=None, max_length=120),
+    days: int = Query(default=90, ge=1, le=3650),
+) -> DashboardSummaryResponse:
+    records = _fetch_filtered_assessment_records(organization_id, participant_id, days)
+
+    if not records:
+        return DashboardSummaryResponse(
+            organization_id=organization_id,
+            participant_id=participant_id,
+            days=days,
+            total_assessments=0,
+            unique_participants=0,
+            signal_counts={},
+            complexity_outlook_distribution={},
+        )
+
+    signal_counts: dict[str, int] = {}
+    outlook_counts: dict[str, int] = {}
+    for record in records:
+        baseline = None
+        if record.participant_id is not None:
+            baseline = _fetch_previous_assessment_record(record.participant_id, record.id)
+        signal = _derive_trend_signal(record, baseline).prediction_signal
+        signal_counts[signal] = signal_counts.get(signal, 0) + 1
+
+        outlook = (
+            record.leadership_complexity_outlook_90_days.value
+            if record.leadership_complexity_outlook_90_days is not None
+            else "not_provided"
+        )
+        outlook_counts[outlook] = outlook_counts.get(outlook, 0) + 1
+
+    participants = {record.participant_id for record in records if record.participant_id}
+    avg_lsi = round(sum(record.lsi_overall for record in records) / len(records), 2)
+    avg_load = round(
+        sum(record.leadership_load_index_overall for record in records) / len(records), 2
+    )
+
+    return DashboardSummaryResponse(
+        organization_id=organization_id,
+        participant_id=participant_id,
+        days=days,
+        total_assessments=len(records),
+        unique_participants=len(participants),
+        avg_lsi_overall=avg_lsi,
+        avg_leadership_load_overall=avg_load,
+        signal_counts=signal_counts,
+        complexity_outlook_distribution=outlook_counts,
+    )
+
+
+@app.get("/dashboard/timeseries", response_model=DashboardTimeseriesResponse)
+async def get_dashboard_timeseries(
+    organization_id: str | None = Query(default=None, max_length=120),
+    participant_id: str | None = Query(default=None, max_length=120),
+    days: int = Query(default=180, ge=1, le=3650),
+) -> DashboardTimeseriesResponse:
+    records = _fetch_filtered_assessment_records(organization_id, participant_id, days)
+
+    points: list[DashboardTimeseriesPoint] = []
+    for record in records:
+        baseline = None
+        if record.participant_id is not None:
+            baseline = _fetch_previous_assessment_record(record.participant_id, record.id)
+        trend = _derive_trend_signal(record, baseline)
+        points.append(
+            DashboardTimeseriesPoint(
+                assessment_id=record.id,
+                created_at=record.created_at,
+                participant_id=record.participant_id,
+                organization_id=record.organization_id,
+                lsi_overall=record.lsi_overall,
+                leadership_load_index_overall=record.leadership_load_index_overall,
+                prediction_signal=trend.prediction_signal,
+            )
+        )
+
+    return DashboardTimeseriesResponse(
+        organization_id=organization_id,
+        participant_id=participant_id,
+        days=days,
+        points=points,
+    )
+
+
+@app.get("/dashboard/signals", response_model=DashboardSignalsResponse)
+async def get_dashboard_signals(
+    organization_id: str | None = Query(default=None, max_length=120),
+    participant_id: str | None = Query(default=None, max_length=120),
+    days: int = Query(default=90, ge=1, le=3650),
+) -> DashboardSignalsResponse:
+    records = _fetch_filtered_assessment_records(organization_id, participant_id, days)
+
+    latest_by_participant: dict[str, AssessmentRecord] = {}
+    for record in records:
+        if not record.participant_id:
+            continue
+        existing = latest_by_participant.get(record.participant_id)
+        if existing is None or record.id > existing.id:
+            latest_by_participant[record.participant_id] = record
+
+    items: list[DashboardSignalEntry] = []
+    for participant, latest in latest_by_participant.items():
+        baseline = _fetch_previous_assessment_record(participant, latest.id)
+        trend = _derive_trend_signal(latest, baseline)
+        items.append(
+            DashboardSignalEntry(
+                participant_id=participant,
+                organization_id=latest.organization_id,
+                assessment_id=latest.id,
+                created_at=latest.created_at,
+                prediction_signal=trend.prediction_signal,
+                interpretation=trend.interpretation,
+                lsi_overall=latest.lsi_overall,
+                leadership_load_index_overall=latest.leadership_load_index_overall,
+                lsi_overall_change=trend.lsi_overall_change,
+                leadership_load_index_overall_change=trend.leadership_load_index_overall_change,
+            )
+        )
+
+    items.sort(key=lambda item: item.assessment_id, reverse=True)
+    return DashboardSignalsResponse(
+        organization_id=organization_id,
+        participant_id=participant_id,
+        days=days,
+        items=items,
+    )
