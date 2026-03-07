@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Leadership Signal Intelligence Platform</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <h1>Leadership Signal Intelligence Platform</h1>
+        <p class="subtitle">
+          Complete the 35-question assessment and generate scoring + trend
+          insights instantly.
+        </p>
+      </header>
+
+      <section class="panel">
+        <h2>Participant Context</h2>
+        <div class="meta-grid">
+          <label>
+            Participant ID (optional)
+            <input id="participant-id" type="text" maxlength="120" />
+          </label>
+          <label>
+            Organization ID (optional)
+            <input id="organization-id" type="text" maxlength="120" />
+          </label>
+          <label>
+            Q35: 90-day complexity outlook (optional)
+            <select id="complexity-outlook">
+              <option value="">Select outlook</option>
+              <option value="decrease">Decrease</option>
+              <option value="stay_about_the_same">Stay about the same</option>
+              <option value="increase">Increase</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Assessment Questions</h2>
+        <p id="scale-description" class="scale-description">
+          Loading question scale...
+        </p>
+        <form id="assessment-form" novalidate>
+          <div id="questions-root"></div>
+          <div class="actions">
+            <button type="button" id="fill-neutral-button" class="secondary">
+              Fill neutral values
+            </button>
+            <button type="button" id="clear-button" class="secondary">
+              Clear answers
+            </button>
+            <button type="submit" id="submit-button">Submit assessment</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Status</h2>
+        <p id="status-message" class="status idle">Loading template...</p>
+      </section>
+
+      <section class="panel" id="results-panel" hidden>
+        <h2>Assessment Results</h2>
+        <div class="results-grid">
+          <div>
+            <h3>Record</h3>
+            <ul id="record-summary" class="summary-list"></ul>
+          </div>
+          <div>
+            <h3>Overall Scores</h3>
+            <ul id="overall-summary" class="summary-list"></ul>
+          </div>
+        </div>
+
+        <div class="results-grid">
+          <div>
+            <h3>LSI Domains</h3>
+            <table id="lsi-table" class="score-table"></table>
+          </div>
+          <div>
+            <h3>Leadership Load Index</h3>
+            <table id="load-table" class="score-table"></table>
+          </div>
+        </div>
+
+        <div>
+          <h3>Trend Signal</h3>
+          <ul id="trend-summary" class="summary-list"></ul>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

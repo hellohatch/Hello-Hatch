@@ -30,6 +30,31 @@ async def test_health_endpoint_returns_ok() -> None:
 
 
 @pytest.mark.anyio
+async def test_frontend_root_serves_html() -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Leadership Signal Intelligence Platform" in response.text
+
+
+@pytest.mark.anyio
+async def test_frontend_static_asset_is_available() -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/static/app.js")
+
+    assert response.status_code == 200
+    assert "javascript" in response.headers["content-type"]
+
+
+@pytest.mark.anyio
 async def test_create_signal_returns_created_signal() -> None:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app),

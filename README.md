@@ -29,6 +29,10 @@ API base URL:
 
 `http://127.0.0.1:8000`
 
+Frontend URL:
+
+`http://127.0.0.1:8000/`
+
 ## API endpoints
 
 ### Health
@@ -67,3 +71,5 @@ API base URL:
 After `make run`, validate:
 
 `curl -sS http://127.0.0.1:8000/health`
+
+Then open `http://127.0.0.1:8000/` to complete and submit the full assessment from the browser UI.

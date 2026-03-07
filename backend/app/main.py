@@ -6,6 +6,8 @@ import sqlite3
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
 app = FastAPI(title="Leadership Signal Intelligence Platform API")
@@ -13,6 +15,8 @@ app = FastAPI(title="Leadership Signal Intelligence Platform API")
 _signals: list["Signal"] = []
 _next_signal_id = 1
 _default_db_path = Path(__file__).resolve().parents[2] / "database" / "assessments.db"
+_frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
+_frontend_index_path = _frontend_dir / "index.html"
 
 LIKERT_SCALE: dict[int, str] = {
     1: "Rarely true for me",
@@ -563,11 +567,22 @@ def _derive_trend_signal(
 
 
 configure_database(str(_default_db_path))
+if _frontend_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(_frontend_dir)), name="static")
 
 
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/", include_in_schema=False)
+async def serve_frontend() -> FileResponse:
+    if not _frontend_index_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="frontend is not available"
+        )
+    return FileResponse(_frontend_index_path)
 
 
 @app.post("/signals", response_model=Signal, status_code=status.HTTP_201_CREATED)
