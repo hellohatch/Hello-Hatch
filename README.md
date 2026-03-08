@@ -75,6 +75,34 @@ Useful operations:
 - Tail logs: `make deploy-prod-logs`
 - Stop stack: `make deploy-prod-down`
 
+### Optional: auto-deploy on every push (GitHub Actions)
+
+Workflow file:
+
+- `.github/workflows/deploy-prod.yml`
+
+Trigger:
+
+- Push to branch `cursor/project-next-steps-ed26`
+- Manual `workflow_dispatch`
+
+Repository secrets required:
+
+- `DEPLOY_HOST` (server hostname/IP)
+- `DEPLOY_USER` (SSH user)
+- `DEPLOY_SSH_KEY` (private key for `DEPLOY_USER`)
+- `DEPLOY_PATH` (absolute path to this repo on server)
+- `DEPLOY_ENV_FILE` (full multiline `.env.production` contents)
+- Optional: `DEPLOY_PORT` (defaults to `22`)
+- Optional: `DEPLOY_KNOWN_HOSTS` (recommended fixed host key entry)
+
+Server prerequisites for auto-deploy:
+
+1. Repo already cloned at `DEPLOY_PATH` with `origin` set to GitHub.
+2. Docker + Docker Compose plugin installed.
+3. `make` installed.
+4. `DEPLOY_USER` has permissions to run Docker commands.
+
 Smoke test:
 
 `curl -sS https://<your-domain>/health`
