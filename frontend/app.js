@@ -5,6 +5,9 @@ const scaleDescription = document.getElementById("scale-description");
 const submitButton = document.getElementById("submit-button");
 const fillNeutralButton = document.getElementById("fill-neutral-button");
 const clearButton = document.getElementById("clear-button");
+const openExecutiveBriefButton = document.getElementById(
+  "open-executive-brief-button",
+);
 const resultsPanel = document.getElementById("results-panel");
 
 const participantIdInput = document.getElementById("participant-id");
@@ -49,6 +52,7 @@ let template = null;
 let accessToken = null;
 let currentOrganizationId = null;
 let currentUsername = null;
+let lastAssessmentId = null;
 
 function setStatus(text, tone = "idle") {
   statusMessage.textContent = text;
