@@ -1,4 +1,4 @@
-.PHONY: install test run build docker-build docker-run
+.PHONY: install test run build docker-build docker-run deploy-prod deploy-prod-logs deploy-prod-down
 
 install:
 	python3 -m pip install -r requirements.txt
@@ -21,3 +21,12 @@ docker-run:
 		-e LSI_JWT_SECRET=$${LSI_JWT_SECRET:-dev-secret-change} \
 		-e LSI_TOKEN_TTL_MINUTES=$${LSI_TOKEN_TTL_MINUTES:-480} \
 		leadership-risk-intelligence:latest
+
+deploy-prod:
+	docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+
+deploy-prod-logs:
+	docker compose --env-file .env.production -f docker-compose.prod.yml logs -f
+
+deploy-prod-down:
+	docker compose --env-file .env.production -f docker-compose.prod.yml down

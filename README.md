@@ -44,32 +44,52 @@ Dashboard:
 
 Use the `Dashboard` tab in the UI at `http://127.0.0.1:8000/`.
 
-## Go live (Docker)
+## Go live (one command with HTTPS)
 
-Build the production image:
+This repository includes a production `docker-compose` stack with:
 
-`make docker-build`
+- FastAPI app container
+- Caddy reverse proxy with automatic TLS certificates
+- Persistent volumes for SQLite data and Caddy state
 
-Run the container:
+Prerequisites:
 
-`docker run -d --name lri-platform -p 8000:8000 -v lri_data:/app/database -e LSI_API_PASSWORD='replace-with-strong-password' -e LSI_JWT_SECRET='replace-with-long-random-secret' -e LSI_TOKEN_TTL_MINUTES=480 leadership-risk-intelligence:latest`
+- Docker + Docker Compose plugin installed on your server
+- DNS `A` record pointing your domain to that server
+
+Setup once:
+
+1. `cp .env.production.example .env.production`
+2. Edit `.env.production` and set:
+   - `LSI_API_PASSWORD`
+   - `LSI_JWT_SECRET`
+   - `LRI_DOMAIN`
+   - `LETSENCRYPT_EMAIL`
+
+Deploy (single command):
+
+`make deploy-prod`
+
+Useful operations:
+
+- Tail logs: `make deploy-prod-logs`
+- Stop stack: `make deploy-prod-down`
 
 Smoke test:
 
-`curl -sS http://127.0.0.1:8000/health`
+`curl -sS https://<your-domain>/health`
 
 Open:
 
-- `http://127.0.0.1:8000/` (frontend + sign in)
-- `http://127.0.0.1:8000/docs` (interactive API docs)
+- `https://<your-domain>/` (frontend + sign in)
+- `https://<your-domain>/docs` (interactive API docs)
 
 Production checklist:
 
-1. Set strong values for `LSI_API_PASSWORD` and `LSI_JWT_SECRET`.
-2. Persist `/app/database` with a volume (example uses `lri_data`).
-3. Put the container behind TLS (load balancer or reverse proxy).
-4. Restrict network access so only HTTPS traffic is exposed.
-5. Configure routine backups for the SQLite volume.
+1. Keep `.env.production` private and rotate secrets on schedule.
+2. Restrict inbound ports to `80/443`; do not expose app port `8000`.
+3. Back up the Docker volume `lri_data` routinely.
+4. Monitor certificate renewal and container health logs.
 
 ## Authentication and organization scope
 

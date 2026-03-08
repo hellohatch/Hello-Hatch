@@ -1,0 +1,34 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: leadership-risk-intelligence:latest
+    restart: unless-stopped
+    environment:
+      LSI_API_PASSWORD: ${LSI_API_PASSWORD}
+      LSI_JWT_SECRET: ${LSI_JWT_SECRET}
+      LSI_TOKEN_TTL_MINUTES: ${LSI_TOKEN_TTL_MINUTES:-480}
+    volumes:
+      - lri_data:/app/database
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      LRI_DOMAIN: ${LRI_DOMAIN}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  lri_data:
+  caddy_data:
+  caddy_config:
