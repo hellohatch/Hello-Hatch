@@ -131,6 +131,14 @@ async def test_assessment_template_includes_scale_and_context_question() -> None
     payload = response.json()
     assert payload["scale"]["1"] == "Rarely true for me"
     assert payload["scale"]["5"] == "Consistently true for me"
+    assert list(payload["lsi_domain_map"].keys()) == [
+        "Stress Regulation",
+        "Cognitive Breadth",
+        "Trust Climate",
+        "Ethical Integrity",
+        "Leadership Durability",
+        "Adaptive Capacity",
+    ]
     assert payload["context_question_35"]["number"] == 35
 
 

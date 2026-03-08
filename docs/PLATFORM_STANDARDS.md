@@ -28,9 +28,20 @@ LSI domains are fixed:
 
 Definitions must remain consistent across organizations and reports.
 
+Stress Regulation definition (canonical):
+
+Stress Regulation measures a leader's ability to maintain cognitive clarity, emotional composure, and deliberate decision making when pressure increases.
+
+Leadership roles often involve sustained exposure to uncertainty, competing priorities, and high consequence decisions. Leaders with strong stress regulation remain calm and deliberate even when facing escalating demands.
+
+This signal reflects whether pressure is absorbed and processed effectively by the leader or whether stress begins to narrow decision thinking, accelerate reactions, or disrupt judgment.
+
+Stress regulation is critical for leadership stability because unmanaged pressure can quickly propagate through teams and decision systems. When leaders regulate stress effectively, they stabilize the broader leadership environment and preserve decision quality under complexity.
+
 ## 3) Scoring Standards
 
 - Domain score = average of assigned question set.
+- Stress Regulation Score = average of Q1–Q4.
 - LSI and LLI scores are each in `1..5`.
 - Concentration Exposure Index™ (CEI) is computed with the standardized CEI algorithm.
 - Leadership Risk Score™ is computed with the standardized formula.

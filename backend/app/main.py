@@ -71,7 +71,14 @@ CEI_STAGE_MODIFIERS: dict[str, int] = {
 }
 
 DOMAIN_DEFINITIONS: dict[str, str] = {
-    "Stress Regulation": "Stress Regulation measures whether your leadership remains calm and deliberate when priorities and pressures compete.",
+    "Stress Regulation": (
+        "Stress Regulation measures a leader's ability to maintain cognitive clarity, emotional composure, and deliberate decision making when pressure increases. "
+        "Leadership roles often involve sustained exposure to uncertainty, competing priorities, and high consequence decisions. "
+        "Leaders with strong stress regulation remain calm and deliberate even when facing escalating demands. "
+        "This signal reflects whether pressure is absorbed and processed effectively by the leader or whether stress begins to narrow decision thinking, accelerate reactions, or disrupt judgment. "
+        "Stress regulation is critical for leadership stability because unmanaged pressure can quickly propagate through teams and decision systems. "
+        "When leaders regulate stress effectively, they stabilize the broader leadership environment and preserve decision quality under complexity."
+    ),
     "Cognitive Breadth": "Cognitive Breadth measures how consistently you explore multiple options and perspectives before decisions converge.",
     "Trust Climate": "Trust Climate measures whether your leadership environment supports candid challenge, dissent, and constructive dialogue.",
     "Ethical Integrity": "Ethical Integrity measures the consistency with which your decisions remain anchored in principles under pressure.",

@@ -28,6 +28,16 @@ This layer measures six leadership capability signals (scores `1..5`):
 
 These signals represent the behavioral infrastructure of leadership stability under complexity.
 
+### Domain definition — Stress Regulation
+
+Stress Regulation measures a leader's ability to maintain cognitive clarity, emotional composure, and deliberate decision making when pressure increases.
+
+Leadership roles often involve sustained exposure to uncertainty, competing priorities, and high consequence decisions. Leaders with strong stress regulation remain calm and deliberate even when facing escalating demands.
+
+This signal reflects whether pressure is absorbed and processed effectively by the leader or whether stress begins to narrow decision thinking, accelerate reactions, or disrupt judgment.
+
+Stress regulation is critical for leadership stability because unmanaged pressure can quickly propagate through teams and decision systems. When leaders regulate stress effectively, they stabilize the broader leadership environment and preserve decision quality under complexity.
+
 ### Behavioral output
 
 Each leader produces six continuous variables stored over time:
@@ -38,6 +48,10 @@ Each leader produces six continuous variables stored over time:
 - Ethical Integrity Score
 - Leadership Durability Score
 - Adaptive Capacity Score
+
+Scoring standard for this domain:
+
+- Stress Regulation Score = average of Q1–Q4
 
 ---
 
@@ -88,6 +102,10 @@ Core components:
 2. Leadership Stability Risk = `5 - Leadership Stability Score`
 3. Leadership Load contribution
 4. CEI stage modifier
+
+Leadership Stability weighted component includes:
+
+- `(Stress Regulation × 0.15)`
 
 CEI stage modifiers:
 
