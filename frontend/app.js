@@ -54,6 +54,55 @@ let currentOrganizationId = null;
 let currentUsername = null;
 let lastAssessmentId = null;
 
+function toExecutiveBriefFilename(assessmentId) {
+  return `executive_insight_brief_${assessmentId}.html`;
+}
+
+async function openExecutiveBrief() {
+  if (!accessToken) {
+    setStatus("Sign in before opening an Executive Insight Brief.", "error");
+    return;
+  }
+  if (!lastAssessmentId) {
+    setStatus("Submit an assessment first to open its Executive Insight Brief.", "error");
+    return;
+  }
+
+  setStatus("Generating Executive Insight Brief...", "idle");
+  try {
+    const response = await apiFetch(`/reports/${lastAssessmentId}/executive-brief`);
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Brief generation failed (${response.status}): ${errorBody}`);
+    }
+
+    const htmlText = await response.text();
+    const blob = new Blob([htmlText], { type: "text/html" });
+    const objectUrl = URL.createObjectURL(blob);
+    const briefWindow = window.open(objectUrl, "_blank", "noopener");
+    if (briefWindow) {
+      setStatus("Executive Insight Brief opened in a new tab.", "success");
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+      return;
+    }
+
+    // Fallback when popups are blocked: force a file download.
+    const downloadLink = document.createElement("a");
+    downloadLink.href = objectUrl;
+    downloadLink.download = toExecutiveBriefFilename(lastAssessmentId);
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    setStatus(
+      "Popup blocked; downloaded Executive Insight Brief instead.",
+      "success",
+    );
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+  } catch (error) {
+    setStatus(String(error), "error");
+  }
+}
+
 function setStatus(text, tone = "idle") {
   statusMessage.textContent = text;
   statusMessage.className = `status ${tone}`;
@@ -549,6 +598,7 @@ async function handleSubmit(event) {
     }
 
     const record = await submitResponse.json();
+    lastAssessmentId = record.id;
     const trendResponse = await apiFetch(`/assessments/${record.id}/trend`);
     if (!trendResponse.ok) {
       throw new Error(`Trend fetch failed (${trendResponse.status})`);
@@ -598,6 +648,7 @@ async function handleLogin() {
 function handleLogout() {
   clearSession();
   template = null;
+  lastAssessmentId = null;
   questionsRoot.innerHTML = "";
   resultsPanel.hidden = true;
   setAuthStatus("Signed out.", "idle");
@@ -633,6 +684,9 @@ fillNeutralButton.addEventListener("click", () => {
 clearButton.addEventListener("click", () => {
   clearAllResponses();
   setStatus("All responses cleared.", "idle");
+});
+openExecutiveBriefButton.addEventListener("click", () => {
+  openExecutiveBrief().catch((error) => setStatus(String(error), "error"));
 });
 
 setActiveView("assessment");

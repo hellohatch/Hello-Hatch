@@ -335,3 +335,74 @@ async def test_dashboard_summary_and_signals_are_org_scoped() -> None:
     assert "leadership_risk_score" in first_signal
     assert "concentration_exposure_stage" in first_signal
     assert forbidden_summary.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_executive_brief_endpoint_returns_html_with_standard_visuals() -> None:
+    responses = {q: 3 for q in range(1, 35)}
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://test",
+    ) as client:
+        submit_response = await client.post(
+            "/assessments/submit",
+            json={
+                "participant_id": "leader-brief",
+                "organization_id": "org-brief",
+                "responses": responses,
+                "leadership_complexity_outlook_90_days": "stay_about_the_same",
+            },
+            headers=auth_headers("org-brief"),
+        )
+        assert submit_response.status_code == 201
+        assessment_id = submit_response.json()["id"]
+
+        brief_response = await client.get(
+            f"/reports/{assessment_id}/executive-brief",
+            headers=auth_headers("org-brief"),
+        )
+
+    assert brief_response.status_code == 200
+    assert "text/html" in brief_response.headers["content-type"]
+    assert "Executive Insight Brief" in brief_response.text
+    assert 'id="leadership-signal-radar"' in brief_response.text
+    assert 'id="cei-stage-graphic"' in brief_response.text
+    assert 'id="cost-cascade-graphic"' in brief_response.text
+
+
+@pytest.mark.anyio
+async def test_executive_brief_endpoint_enforces_org_scope_and_download_header() -> None:
+    responses = {q: 3 for q in range(1, 35)}
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://test",
+    ) as client:
+        submit_response = await client.post(
+            "/assessments/submit",
+            json={
+                "participant_id": "leader-brief-2",
+                "organization_id": "org-brief",
+                "responses": responses,
+            },
+            headers=auth_headers("org-brief"),
+        )
+        assert submit_response.status_code == 201
+        assessment_id = submit_response.json()["id"]
+
+        forbidden_response = await client.get(
+            f"/reports/{assessment_id}/executive-brief",
+            headers=auth_headers("org-other"),
+        )
+        downloadable_response = await client.get(
+            f"/reports/{assessment_id}/executive-brief?download=true",
+            headers=auth_headers("org-brief"),
+        )
+
+    assert forbidden_response.status_code == 403
+    assert downloadable_response.status_code == 200
+    assert (
+        downloadable_response.headers.get("content-disposition")
+        == f'attachment; filename="executive_insight_brief_{assessment_id}.html"'
+    )
