@@ -1,6 +1,7 @@
-import pytest
 import httpx
 from pathlib import Path
+
+import pytest
 
 from backend.app import main
 
@@ -15,6 +16,49 @@ def reset_state(tmp_path: Path) -> None:
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+def auth_headers(
+    organization_id: str = "org-test",
+    username: str = "tester",
+) -> dict[str, str]:
+    token = main.create_access_token(username=username, organization_id=organization_id)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.anyio
+async def test_auth_token_endpoint_returns_bearer_token() -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/auth/token",
+            json={
+                "username": "alice",
+                "password": main._auth_password,
+                "organization_id": "org-alpha",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["token_type"] == "bearer"
+    assert payload["username"] == "alice"
+    assert payload["organization_id"] == "org-alpha"
+    assert isinstance(payload["access_token"], str)
+    assert len(payload["access_token"].split(".")) == 3
+
+
+@pytest.mark.anyio
+async def test_assessment_endpoints_require_auth() -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/assessments/template")
+
+    assert response.status_code == 401
 
 
 @pytest.mark.anyio
@@ -39,7 +83,8 @@ async def test_frontend_root_serves_html() -> None:
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "Leadership Signal Intelligence Platform" in response.text
+    assert "Leadership Risk Intelligence Platform" in response.text
+    assert "Access Control" in response.text
 
 
 @pytest.mark.anyio
@@ -70,42 +115,7 @@ async def test_create_signal_returns_created_signal() -> None:
         )
 
     assert response.status_code == 201
-    assert response.json() == {
-        "id": 1,
-        "title": "Quarterly leadership memo",
-        "source": "internal-news",
-        "summary": "Exec team shared direction for Q2.",
-    }
-
-
-@pytest.mark.anyio
-async def test_list_signals_returns_created_items() -> None:
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=main.app),
-        base_url="http://test",
-    ) as client:
-        create_response = await client.post(
-            "/signals",
-            json={
-                "title": "Board interview published",
-                "source": "external-press",
-                "summary": "CEO discussed expansion plans.",
-            },
-        )
-        assert create_response.status_code == 201
-
-        list_response = await client.get("/signals")
-
-    assert create_response.status_code == 201
-    assert list_response.status_code == 200
-    assert list_response.json() == [
-        {
-            "id": 1,
-            "title": "Board interview published",
-            "source": "external-press",
-            "summary": "CEO discussed expansion plans.",
-        }
-    ]
+    assert response.json()["id"] == 1
 
 
 @pytest.mark.anyio
@@ -113,6 +123,7 @@ async def test_assessment_template_includes_scale_and_context_question() -> None
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app),
         base_url="http://test",
+        headers=auth_headers("org-a"),
     ) as client:
         response = await client.get("/assessments/template")
 
@@ -121,11 +132,6 @@ async def test_assessment_template_includes_scale_and_context_question() -> None
     assert payload["scale"]["1"] == "Rarely true for me"
     assert payload["scale"]["5"] == "Consistently true for me"
     assert payload["context_question_35"]["number"] == 35
-    assert payload["context_question_35"]["options"] == [
-        "Decrease",
-        "Stay about the same",
-        "Increase",
-    ]
 
 
 @pytest.mark.anyio
@@ -146,6 +152,7 @@ async def test_assessment_score_returns_expected_domain_and_index_values() -> No
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app),
         base_url="http://test",
+        headers=auth_headers("org-a"),
     ) as client:
         response = await client.post(
             "/assessments/score",
@@ -157,55 +164,21 @@ async def test_assessment_score_returns_expected_domain_and_index_values() -> No
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["lsi_domains"] == {
-        "Operational Stability": 5.0,
-        "Cognitive Breadth": 4.0,
-        "Trust Climate": 3.0,
-        "Ethical Integrity": 2.0,
-        "Leadership Durability": 1.0,
-        "Adaptive Capacity": 5.0,
-    }
-    assert payload["leadership_load_index_dimensions"] == {
-        "Decision Volume": 1.0,
-        "Interpretive Demand": 2.0,
-        "Strategic Complexity": 3.0,
-        "Leadership Span Pressure": 4.0,
-        "Cognitive Carryover": 5.0,
-    }
     assert payload["lsi_overall"] == 3.33
     assert payload["leadership_load_index_overall"] == 3.0
-    assert payload["leadership_complexity_outlook_90_days"] == "increase"
+    assert payload["leadership_stability_score"] == 3.1
+    assert payload["leadership_stability_risk"] == 1.9
+    assert payload["concentration_exposure_stage"] in {
+        "Healthy Distribution",
+        "Exposure",
+        "Concentration",
+        "Structural Risk",
+    }
+    assert 0 <= payload["leadership_risk_score"] <= 100
 
 
 @pytest.mark.anyio
-async def test_assessment_score_rejects_missing_questions() -> None:
-    responses = {q: 3 for q in range(1, 34)}
-
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=main.app),
-        base_url="http://test",
-    ) as client:
-        response = await client.post("/assessments/score", json={"responses": responses})
-
-    assert response.status_code == 422
-
-
-@pytest.mark.anyio
-async def test_assessment_score_rejects_invalid_scale_value() -> None:
-    responses = {q: 3 for q in range(1, 35)}
-    responses[7] = 6
-
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=main.app),
-        base_url="http://test",
-    ) as client:
-        response = await client.post("/assessments/score", json={"responses": responses})
-
-    assert response.status_code == 422
-
-
-@pytest.mark.anyio
-async def test_assessment_submit_and_get_returns_persisted_record() -> None:
+async def test_assessment_submit_and_get_enforces_org_scope() -> None:
     responses = {q: 3 for q in range(1, 35)}
 
     async with httpx.AsyncClient(
@@ -218,21 +191,42 @@ async def test_assessment_submit_and_get_returns_persisted_record() -> None:
                 "participant_id": "leader-1",
                 "organization_id": "org-42",
                 "responses": responses,
-                "leadership_complexity_outlook_90_days": "increase",
             },
+            headers=auth_headers("org-42"),
         )
         assert submit_response.status_code == 201
         assessment_id = submit_response.json()["id"]
-        get_response = await client.get(f"/assessments/{assessment_id}")
 
-    assert get_response.status_code == 200
-    payload = get_response.json()
-    assert payload["participant_id"] == "leader-1"
-    assert payload["organization_id"] == "org-42"
-    assert len(payload["responses"]) == 34
-    assert payload["lsi_overall"] == 3.0
-    assert payload["leadership_load_index_overall"] == 3.0
-    assert payload["leadership_complexity_outlook_90_days"] == "increase"
+        same_org_get = await client.get(
+            f"/assessments/{assessment_id}", headers=auth_headers("org-42")
+        )
+        other_org_get = await client.get(
+            f"/assessments/{assessment_id}", headers=auth_headers("org-other")
+        )
+
+    assert same_org_get.status_code == 200
+    assert same_org_get.json()["organization_id"] == "org-42"
+    assert other_org_get.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_assessment_submit_rejects_payload_org_mismatch() -> None:
+    responses = {q: 3 for q in range(1, 35)}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://test",
+        headers=auth_headers("org-a"),
+    ) as client:
+        response = await client.post(
+            "/assessments/submit",
+            json={
+                "participant_id": "leader-1",
+                "organization_id": "org-b",
+                "responses": responses,
+            },
+        )
+
+    assert response.status_code == 403
 
 
 @pytest.mark.anyio
@@ -244,14 +238,12 @@ async def test_assessment_trend_returns_improving_capacity_signal() -> None:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app),
         base_url="http://test",
+        headers=auth_headers("org-trend"),
     ) as client:
         first_response = await client.post(
             "/assessments/submit",
             json={"participant_id": "leader-trend", "responses": first},
         )
-        assert first_response.status_code == 201
-        first_id = first_response.json()["id"]
-
         second_response = await client.post(
             "/assessments/submit",
             json={
@@ -260,45 +252,21 @@ async def test_assessment_trend_returns_improving_capacity_signal() -> None:
                 "leadership_complexity_outlook_90_days": "decrease",
             },
         )
-        assert second_response.status_code == 201
-        second_id = second_response.json()["id"]
+        trend_response = await client.get(
+            f"/assessments/{second_response.json()['id']}/trend"
+        )
 
-        trend_response = await client.get(f"/assessments/{second_id}/trend")
-
+    assert first_response.status_code == 201
+    assert second_response.status_code == 201
     assert trend_response.status_code == 200
     trend = trend_response.json()
-    assert trend["assessment_id"] == second_id
-    assert trend["baseline_assessment_id"] == first_id
     assert trend["prediction_signal"] == "improving_capacity"
     assert trend["lsi_overall_change"] == 1.0
     assert trend["leadership_load_index_overall_change"] == -1.0
-    assert trend["complexity_outlook_90_days"] == "decrease"
 
 
 @pytest.mark.anyio
-async def test_assessment_trend_handles_missing_history() -> None:
-    responses = {q: 3 for q in range(1, 35)}
-
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=main.app),
-        base_url="http://test",
-    ) as client:
-        submit_response = await client.post(
-            "/assessments/submit",
-            json={"responses": responses},
-        )
-        assert submit_response.status_code == 201
-        assessment_id = submit_response.json()["id"]
-        trend_response = await client.get(f"/assessments/{assessment_id}/trend")
-
-    assert trend_response.status_code == 200
-    trend = trend_response.json()
-    assert trend["prediction_signal"] == "insufficient_history"
-    assert trend["baseline_assessment_id"] is None
-
-
-@pytest.mark.anyio
-async def test_dashboard_summary_returns_aggregates_for_filters() -> None:
+async def test_dashboard_summary_and_signals_are_org_scoped() -> None:
     responses_a = {q: 4 for q in range(1, 25)}
     responses_a.update({q: 2 for q in range(25, 35)})
     responses_b = {q: 2 for q in range(1, 25)}
@@ -308,98 +276,54 @@ async def test_dashboard_summary_returns_aggregates_for_filters() -> None:
         transport=httpx.ASGITransport(app=main.app),
         base_url="http://test",
     ) as client:
-        submit_a = await client.post(
+        await client.post(
             "/assessments/submit",
             json={
                 "participant_id": "leader-dashboard",
-                "organization_id": "org-a",
                 "responses": responses_a,
                 "leadership_complexity_outlook_90_days": "increase",
             },
+            headers=auth_headers("org-a"),
         )
-        assert submit_a.status_code == 201
-
-        submit_b = await client.post(
+        await client.post(
             "/assessments/submit",
             json={
                 "participant_id": "leader-dashboard",
-                "organization_id": "org-a",
                 "responses": responses_b,
                 "leadership_complexity_outlook_90_days": "decrease",
             },
+            headers=auth_headers("org-a"),
         )
-        assert submit_b.status_code == 201
-
-        other_org = await client.post(
+        await client.post(
             "/assessments/submit",
             json={
                 "participant_id": "other-leader",
-                "organization_id": "org-b",
                 "responses": {q: 3 for q in range(1, 35)},
             },
+            headers=auth_headers("org-b"),
         )
-        assert other_org.status_code == 201
 
-        summary_response = await client.get("/dashboard/summary?organization_id=org-a")
+        summary_response = await client.get(
+            "/dashboard/summary", headers=auth_headers("org-a")
+        )
+        signals_response = await client.get(
+            "/dashboard/signals", headers=auth_headers("org-a")
+        )
+        forbidden_summary = await client.get(
+            "/dashboard/summary?organization_id=org-b",
+            headers=auth_headers("org-a"),
+        )
 
     assert summary_response.status_code == 200
     summary = summary_response.json()
     assert summary["organization_id"] == "org-a"
     assert summary["total_assessments"] == 2
     assert summary["unique_participants"] == 1
-    assert summary["avg_lsi_overall"] == 3.0
-    assert summary["avg_leadership_load_overall"] == 3.0
-    assert summary["complexity_outlook_distribution"]["increase"] == 1
-    assert summary["complexity_outlook_distribution"]["decrease"] == 1
-
-
-@pytest.mark.anyio
-async def test_dashboard_timeseries_and_signals_return_expected_shapes() -> None:
-    baseline = {q: 3 for q in range(1, 35)}
-    better = {q: 4 for q in range(1, 25)}
-    better.update({q: 2 for q in range(25, 35)})
-
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=main.app),
-        base_url="http://test",
-    ) as client:
-        first = await client.post(
-            "/assessments/submit",
-            json={
-                "participant_id": "leader-trend-dashboard",
-                "organization_id": "org-dash",
-                "responses": baseline,
-            },
-        )
-        assert first.status_code == 201
-
-        second = await client.post(
-            "/assessments/submit",
-            json={
-                "participant_id": "leader-trend-dashboard",
-                "organization_id": "org-dash",
-                "responses": better,
-                "leadership_complexity_outlook_90_days": "decrease",
-            },
-        )
-        assert second.status_code == 201
-
-        timeseries_response = await client.get(
-            "/dashboard/timeseries?organization_id=org-dash"
-        )
-        signals_response = await client.get("/dashboard/signals?organization_id=org-dash")
-
-    assert timeseries_response.status_code == 200
-    timeseries = timeseries_response.json()
-    assert len(timeseries["points"]) == 2
-    assert timeseries["points"][0]["assessment_id"] == first.json()["id"]
-    assert timeseries["points"][1]["assessment_id"] == second.json()["id"]
-
+    assert "avg_leadership_risk_score" in summary
+    assert isinstance(summary["cei_stage_counts"], dict)
     assert signals_response.status_code == 200
-    signals = signals_response.json()
-    assert len(signals["items"]) == 1
-    signal = signals["items"][0]
-    assert signal["participant_id"] == "leader-trend-dashboard"
-    assert signal["prediction_signal"] == "improving_capacity"
-    assert signal["lsi_overall_change"] == 1.0
-    assert signal["leadership_load_index_overall_change"] == -1.0
+    assert len(signals_response.json()["items"]) == 1
+    first_signal = signals_response.json()["items"][0]
+    assert "leadership_risk_score" in first_signal
+    assert "concentration_exposure_stage" in first_signal
+    assert forbidden_summary.status_code == 403

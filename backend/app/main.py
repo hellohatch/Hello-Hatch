@@ -1,12 +1,17 @@
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+import base64
+import hashlib
+import hmac
 import json
+import os
 import sqlite3
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
@@ -17,6 +22,10 @@ _next_signal_id = 1
 _default_db_path = Path(__file__).resolve().parents[2] / "database" / "assessments.db"
 _frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
 _frontend_index_path = _frontend_dir / "index.html"
+_auth_secret = os.getenv("LSI_JWT_SECRET", "dev-secret-change")
+_auth_password = os.getenv("LSI_API_PASSWORD", "change-me")
+_token_ttl_minutes = int(os.getenv("LSI_TOKEN_TTL_MINUTES", "480"))
+_auth_bearer = HTTPBearer(auto_error=False)
 
 LIKERT_SCALE: dict[int, str] = {
     1: "Rarely true for me",
@@ -41,6 +50,22 @@ LEADERSHIP_LOAD_QUESTION_MAP: dict[str, list[int]] = {
     "Strategic Complexity": [29, 30],
     "Leadership Span Pressure": [31, 32],
     "Cognitive Carryover": [33, 34],
+}
+
+LSI_STABILITY_WEIGHTS: dict[str, float] = {
+    "Operational Stability": 0.15,
+    "Cognitive Breadth": 0.15,
+    "Trust Climate": 0.15,
+    "Ethical Integrity": 0.15,
+    "Leadership Durability": 0.25,
+    "Adaptive Capacity": 0.15,
+}
+
+CEI_STAGE_MODIFIERS: dict[str, int] = {
+    "Healthy Distribution": 0,
+    "Exposure": 10,
+    "Concentration": 20,
+    "Structural Risk": 30,
 }
 
 SECTION_1_QUESTIONS: list[tuple[int, str, str]] = [
@@ -239,6 +264,25 @@ class LeadershipComplexityOutlook(str, Enum):
     increase = "increase"
 
 
+class AuthTokenRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=120)
+    password: str = Field(min_length=1, max_length=200)
+    organization_id: str = Field(min_length=1, max_length=120)
+
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_at: str
+    username: str
+    organization_id: str
+
+
+class AuthPrincipal(BaseModel):
+    username: str
+    organization_id: str
+
+
 class AssessmentQuestion(BaseModel):
     number: int
     domain: str
@@ -290,6 +334,12 @@ class AssessmentScoreResponse(BaseModel):
     leadership_load_index_dimensions: dict[str, float]
     lsi_overall: float
     leadership_load_index_overall: float
+    leadership_stability_score: float
+    leadership_stability_risk: float
+    leadership_load_score: float
+    concentration_exposure_stage: str
+    leadership_risk_score: float
+    leadership_cost_cascade_stage: str
     leadership_complexity_outlook_90_days: LeadershipComplexityOutlook | None = None
 
 
@@ -328,7 +378,9 @@ class DashboardSummaryResponse(BaseModel):
     unique_participants: int
     avg_lsi_overall: float | None = None
     avg_leadership_load_overall: float | None = None
+    avg_leadership_risk_score: float | None = None
     signal_counts: dict[str, int]
+    cei_stage_counts: dict[str, int]
     complexity_outlook_distribution: dict[str, int]
 
 
@@ -339,6 +391,8 @@ class DashboardTimeseriesPoint(BaseModel):
     organization_id: str | None = None
     lsi_overall: float
     leadership_load_index_overall: float
+    leadership_risk_score: float
+    concentration_exposure_stage: str
     prediction_signal: str
 
 
@@ -358,6 +412,8 @@ class DashboardSignalEntry(BaseModel):
     interpretation: str
     lsi_overall: float
     leadership_load_index_overall: float
+    leadership_risk_score: float
+    concentration_exposure_stage: str
     lsi_overall_change: float | None = None
     leadership_load_index_overall_change: float | None = None
 
@@ -369,8 +425,157 @@ class DashboardSignalsResponse(BaseModel):
     items: list[DashboardSignalEntry]
 
 
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
+
+
+def _b64url_decode(data: str) -> bytes:
+    padding = "=" * ((4 - len(data) % 4) % 4)
+    return base64.urlsafe_b64decode((data + padding).encode("utf-8"))
+
+
+def _sign_token_payload(encoded_header: str, encoded_payload: str) -> str:
+    signing_input = f"{encoded_header}.{encoded_payload}".encode("utf-8")
+    signature = hmac.new(
+        _auth_secret.encode("utf-8"), signing_input, hashlib.sha256
+    ).digest()
+    return _b64url_encode(signature)
+
+
+def create_access_token(
+    username: str, organization_id: str, expires_at: datetime | None = None
+) -> str:
+    if expires_at is None:
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=_token_ttl_minutes)
+
+    payload = {
+        "sub": username,
+        "organization_id": organization_id,
+        "exp": int(expires_at.timestamp()),
+    }
+    encoded_header = _b64url_encode(
+        json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode("utf-8")
+    )
+    encoded_payload = _b64url_encode(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    )
+    signature = _sign_token_payload(encoded_header, encoded_payload)
+    return f"{encoded_header}.{encoded_payload}.{signature}"
+
+
+def _decode_access_token(token: str) -> dict[str, str | int]:
+    try:
+        encoded_header, encoded_payload, signature = token.split(".")
+    except ValueError as exc:
+        raise ValueError("invalid token format") from exc
+
+    expected_signature = _sign_token_payload(encoded_header, encoded_payload)
+    if not hmac.compare_digest(signature, expected_signature):
+        raise ValueError("invalid token signature")
+
+    try:
+        payload = json.loads(_b64url_decode(encoded_payload).decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("invalid token payload") from exc
+
+    exp = payload.get("exp")
+    if not isinstance(exp, int):
+        raise ValueError("invalid token expiration")
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    if exp < now_ts:
+        raise ValueError("token expired")
+
+    if not isinstance(payload.get("sub"), str) or not isinstance(
+        payload.get("organization_id"), str
+    ):
+        raise ValueError("invalid token claims")
+    return payload
+
+
+def get_current_principal(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_auth_bearer),
+) -> AuthPrincipal:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="missing bearer token",
+        )
+
+    try:
+        payload = _decode_access_token(credentials.credentials)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+
+    return AuthPrincipal(
+        username=str(payload["sub"]),
+        organization_id=str(payload["organization_id"]),
+    )
+
+
+def _enforce_org_scope(principal: AuthPrincipal, organization_id: str) -> None:
+    if organization_id != principal.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="organization scope violation",
+        )
+
+
 def _average(responses: dict[int, int], question_numbers: Sequence[int]) -> float:
     return round(sum(responses[q] for q in question_numbers) / len(question_numbers), 2)
+
+
+def _classify_cei_stage(
+    leadership_load_score: float, leadership_durability_score: float, cognitive_breadth_score: float
+) -> str:
+    if leadership_load_score >= 4.2 and (
+        leadership_durability_score <= 2.8 or cognitive_breadth_score <= 2.8
+    ):
+        return "Structural Risk"
+    if leadership_load_score >= 3.6 and (
+        leadership_durability_score <= 3.2 or cognitive_breadth_score <= 3.2
+    ):
+        return "Concentration"
+    if leadership_load_score >= 3.0 and (
+        leadership_durability_score <= 3.6 or cognitive_breadth_score <= 3.6
+    ):
+        return "Exposure"
+    return "Healthy Distribution"
+
+
+def _derive_risk_metrics_from_domain_scores(
+    lsi_domains: dict[str, float],
+    load_dimensions: dict[str, float],
+) -> dict[str, float | str]:
+    leadership_stability_score = round(
+        sum(lsi_domains[domain] * weight for domain, weight in LSI_STABILITY_WEIGHTS.items()),
+        2,
+    )
+    leadership_stability_risk = round(5 - leadership_stability_score, 2)
+    leadership_load_score = round(
+        sum(load_dimensions.values()) / len(load_dimensions),
+        2,
+    )
+    cei_stage = _classify_cei_stage(
+        leadership_load_score=leadership_load_score,
+        leadership_durability_score=lsi_domains["Leadership Durability"],
+        cognitive_breadth_score=lsi_domains["Cognitive Breadth"],
+    )
+    stability_component = (leadership_stability_risk / 4) * 40
+    load_component = ((leadership_load_score - 1) / 4) * 40
+    raw_risk_score = stability_component + load_component + CEI_STAGE_MODIFIERS[cei_stage]
+    leadership_risk_score = round(max(0.0, min(100.0, raw_risk_score)), 2)
+
+    return {
+        "leadership_stability_score": leadership_stability_score,
+        "leadership_stability_risk": leadership_stability_risk,
+        "leadership_load_score": leadership_load_score,
+        "concentration_exposure_stage": cei_stage,
+        "leadership_risk_score": leadership_risk_score,
+        "leadership_cost_cascade_stage": cei_stage,
+    }
 
 
 def _compute_assessment_scores(payload: AssessmentSubmission) -> AssessmentScoreResponse:
@@ -382,6 +587,7 @@ def _compute_assessment_scores(payload: AssessmentSubmission) -> AssessmentScore
         dimension: _average(payload.responses, questions)
         for dimension, questions in LEADERSHIP_LOAD_QUESTION_MAP.items()
     }
+    risk_metrics = _derive_risk_metrics_from_domain_scores(lsi_domains, load_dimensions)
 
     return AssessmentScoreResponse(
         lsi_domains=lsi_domains,
@@ -390,6 +596,12 @@ def _compute_assessment_scores(payload: AssessmentSubmission) -> AssessmentScore
         leadership_load_index_overall=round(
             sum(load_dimensions.values()) / len(load_dimensions), 2
         ),
+        leadership_stability_score=float(risk_metrics["leadership_stability_score"]),
+        leadership_stability_risk=float(risk_metrics["leadership_stability_risk"]),
+        leadership_load_score=float(risk_metrics["leadership_load_score"]),
+        concentration_exposure_stage=str(risk_metrics["concentration_exposure_stage"]),
+        leadership_risk_score=float(risk_metrics["leadership_risk_score"]),
+        leadership_cost_cascade_stage=str(risk_metrics["leadership_cost_cascade_stage"]),
         leadership_complexity_outlook_90_days=payload.leadership_complexity_outlook_90_days,
     )
 
@@ -421,10 +633,33 @@ def configure_database(db_path: str) -> None:
                 leadership_load_index_dimensions_json TEXT NOT NULL,
                 lsi_overall REAL NOT NULL,
                 leadership_load_index_overall REAL NOT NULL,
+                leadership_stability_score REAL,
+                leadership_stability_risk REAL,
+                leadership_load_score REAL,
+                concentration_exposure_stage TEXT,
+                leadership_risk_score REAL,
+                leadership_cost_cascade_stage TEXT,
                 created_at TEXT NOT NULL
             )
             """
         )
+        existing_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(assessments)").fetchall()
+        }
+        required_columns: dict[str, str] = {
+            "leadership_stability_score": "REAL",
+            "leadership_stability_risk": "REAL",
+            "leadership_load_score": "REAL",
+            "concentration_exposure_stage": "TEXT",
+            "leadership_risk_score": "REAL",
+            "leadership_cost_cascade_stage": "TEXT",
+        }
+        for column, column_type in required_columns.items():
+            if column not in existing_columns:
+                connection.execute(
+                    f"ALTER TABLE assessments ADD COLUMN {column} {column_type}"
+                )
         connection.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_assessments_participant_id
@@ -440,10 +675,17 @@ def _row_to_assessment_record(row: sqlite3.Row) -> AssessmentRecord:
         k: float(v)
         for k, v in json.loads(row["leadership_load_index_dimensions_json"]).items()
     }
+    risk_metrics = _derive_risk_metrics_from_domain_scores(lsi_domains, load_dimensions)
     outlook_value = row["leadership_complexity_outlook_90_days"]
     outlook = (
         LeadershipComplexityOutlook(outlook_value) if outlook_value is not None else None
     )
+    leadership_stability_score = row["leadership_stability_score"]
+    leadership_stability_risk = row["leadership_stability_risk"]
+    leadership_load_score = row["leadership_load_score"]
+    concentration_exposure_stage = row["concentration_exposure_stage"]
+    leadership_risk_score = row["leadership_risk_score"]
+    leadership_cost_cascade_stage = row["leadership_cost_cascade_stage"]
     return AssessmentRecord(
         id=int(row["id"]),
         participant_id=row["participant_id"],
@@ -454,6 +696,36 @@ def _row_to_assessment_record(row: sqlite3.Row) -> AssessmentRecord:
         leadership_load_index_dimensions=load_dimensions,
         lsi_overall=float(row["lsi_overall"]),
         leadership_load_index_overall=float(row["leadership_load_index_overall"]),
+        leadership_stability_score=(
+            float(leadership_stability_score)
+            if leadership_stability_score is not None
+            else float(risk_metrics["leadership_stability_score"])
+        ),
+        leadership_stability_risk=(
+            float(leadership_stability_risk)
+            if leadership_stability_risk is not None
+            else float(risk_metrics["leadership_stability_risk"])
+        ),
+        leadership_load_score=(
+            float(leadership_load_score)
+            if leadership_load_score is not None
+            else float(risk_metrics["leadership_load_score"])
+        ),
+        concentration_exposure_stage=(
+            str(concentration_exposure_stage)
+            if concentration_exposure_stage is not None
+            else str(risk_metrics["concentration_exposure_stage"])
+        ),
+        leadership_risk_score=(
+            float(leadership_risk_score)
+            if leadership_risk_score is not None
+            else float(risk_metrics["leadership_risk_score"])
+        ),
+        leadership_cost_cascade_stage=(
+            str(leadership_cost_cascade_stage)
+            if leadership_cost_cascade_stage is not None
+            else str(risk_metrics["leadership_cost_cascade_stage"])
+        ),
         leadership_complexity_outlook_90_days=outlook,
     )
 
@@ -472,6 +744,12 @@ def _fetch_assessment_record(assessment_id: int) -> AssessmentRecord | None:
                 leadership_load_index_dimensions_json,
                 lsi_overall,
                 leadership_load_index_overall,
+                leadership_stability_score,
+                leadership_stability_risk,
+                leadership_load_score,
+                concentration_exposure_stage,
+                leadership_risk_score,
+                leadership_cost_cascade_stage,
                 created_at
             FROM assessments
             WHERE id = ?
@@ -484,7 +762,7 @@ def _fetch_assessment_record(assessment_id: int) -> AssessmentRecord | None:
 
 
 def _fetch_previous_assessment_record(
-    participant_id: str, assessment_id: int
+    participant_id: str, organization_id: str, assessment_id: int
 ) -> AssessmentRecord | None:
     with _get_db_connection() as connection:
         row = connection.execute(
@@ -499,13 +777,19 @@ def _fetch_previous_assessment_record(
                 leadership_load_index_dimensions_json,
                 lsi_overall,
                 leadership_load_index_overall,
+                leadership_stability_score,
+                leadership_stability_risk,
+                leadership_load_score,
+                concentration_exposure_stage,
+                leadership_risk_score,
+                leadership_cost_cascade_stage,
                 created_at
             FROM assessments
-            WHERE participant_id = ? AND id < ?
+            WHERE participant_id = ? AND organization_id = ? AND id < ?
             ORDER BY id DESC
             LIMIT 1
             """,
-            (participant_id, assessment_id),
+            (participant_id, organization_id, assessment_id),
         ).fetchone()
     if row is None:
         return None
@@ -528,9 +812,15 @@ def _store_assessment(
                 leadership_load_index_dimensions_json,
                 lsi_overall,
                 leadership_load_index_overall,
+                leadership_stability_score,
+                leadership_stability_risk,
+                leadership_load_score,
+                concentration_exposure_stage,
+                leadership_risk_score,
+                leadership_cost_cascade_stage,
                 created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload.participant_id,
@@ -545,6 +835,12 @@ def _store_assessment(
                 json.dumps(score.leadership_load_index_dimensions),
                 score.lsi_overall,
                 score.leadership_load_index_overall,
+                score.leadership_stability_score,
+                score.leadership_stability_risk,
+                score.leadership_load_score,
+                score.concentration_exposure_stage,
+                score.leadership_risk_score,
+                score.leadership_cost_cascade_stage,
                 created_at,
             ),
         )
@@ -582,6 +878,12 @@ def _fetch_filtered_assessment_records(
             leadership_load_index_dimensions_json,
             lsi_overall,
             leadership_load_index_overall,
+                leadership_stability_score,
+                leadership_stability_risk,
+                leadership_load_score,
+                concentration_exposure_stage,
+                leadership_risk_score,
+                leadership_cost_cascade_stage,
             created_at
         FROM assessments
         WHERE {" AND ".join(where_clauses)}
@@ -663,6 +965,26 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.post("/auth/token", response_model=AuthTokenResponse)
+async def create_auth_token(payload: AuthTokenRequest) -> AuthTokenResponse:
+    if payload.password != _auth_password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid credentials",
+        )
+
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=_token_ttl_minutes)
+    access_token = create_access_token(
+        payload.username, payload.organization_id, expires_at=expires_at
+    )
+    return AuthTokenResponse(
+        access_token=access_token,
+        expires_at=expires_at.isoformat(),
+        username=payload.username,
+        organization_id=payload.organization_id,
+    )
+
+
 @app.get("/", include_in_schema=False)
 async def serve_frontend() -> FileResponse:
     if not _frontend_index_path.exists():
@@ -688,7 +1010,9 @@ async def list_signals() -> Sequence[Signal]:
 
 
 @app.get("/assessments/template", response_model=AssessmentTemplate)
-async def get_assessment_template() -> AssessmentTemplate:
+async def get_assessment_template(
+    _: AuthPrincipal = Depends(get_current_principal),
+) -> AssessmentTemplate:
     return AssessmentTemplate(
         scale=LIKERT_SCALE,
         section_1=[
@@ -711,7 +1035,10 @@ async def get_assessment_template() -> AssessmentTemplate:
 
 
 @app.post("/assessments/score", response_model=AssessmentScoreResponse)
-async def score_assessment(payload: AssessmentSubmission) -> AssessmentScoreResponse:
+async def score_assessment(
+    payload: AssessmentSubmission,
+    _: AuthPrincipal = Depends(get_current_principal),
+) -> AssessmentScoreResponse:
     return _compute_assessment_scores(payload)
 
 
@@ -720,32 +1047,59 @@ async def score_assessment(payload: AssessmentSubmission) -> AssessmentScoreResp
     response_model=AssessmentRecord,
     status_code=status.HTTP_201_CREATED,
 )
-async def submit_assessment(payload: AssessmentSubmitRequest) -> AssessmentRecord:
-    score = _compute_assessment_scores(payload)
-    return _store_assessment(payload, score)
+async def submit_assessment(
+    payload: AssessmentSubmitRequest,
+    principal: AuthPrincipal = Depends(get_current_principal),
+) -> AssessmentRecord:
+    if payload.organization_id is not None:
+        _enforce_org_scope(principal, payload.organization_id)
+
+    scoped_payload = payload.model_copy(update={"organization_id": principal.organization_id})
+    score = _compute_assessment_scores(scoped_payload)
+    return _store_assessment(scoped_payload, score)
 
 
 @app.get("/assessments/{assessment_id}", response_model=AssessmentRecord)
-async def get_assessment(assessment_id: int) -> AssessmentRecord:
+async def get_assessment(
+    assessment_id: int,
+    principal: AuthPrincipal = Depends(get_current_principal),
+) -> AssessmentRecord:
     record = _fetch_assessment_record(assessment_id)
     if record is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="assessment not found"
         )
+    if record.organization_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="assessment missing organization scope",
+        )
+    _enforce_org_scope(principal, record.organization_id)
     return record
 
 
 @app.get("/assessments/{assessment_id}/trend", response_model=AssessmentTrendResponse)
-async def get_assessment_trend(assessment_id: int) -> AssessmentTrendResponse:
+async def get_assessment_trend(
+    assessment_id: int,
+    principal: AuthPrincipal = Depends(get_current_principal),
+) -> AssessmentTrendResponse:
     current = _fetch_assessment_record(assessment_id)
     if current is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="assessment not found"
         )
+    if current.organization_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="assessment missing organization scope",
+        )
+    _enforce_org_scope(principal, current.organization_id)
 
     baseline = None
     if current.participant_id is not None:
-        baseline = _fetch_previous_assessment_record(current.participant_id, assessment_id)
+        baseline = _fetch_previous_assessment_record(
+            current.participant_id, current.organization_id, assessment_id
+        )
     return _derive_trend_signal(current, baseline)
 
 
@@ -754,28 +1108,37 @@ async def get_dashboard_summary(
     organization_id: str | None = Query(default=None, max_length=120),
     participant_id: str | None = Query(default=None, max_length=120),
     days: int = Query(default=90, ge=1, le=3650),
+    principal: AuthPrincipal = Depends(get_current_principal),
 ) -> DashboardSummaryResponse:
-    records = _fetch_filtered_assessment_records(organization_id, participant_id, days)
+    scoped_org = organization_id or principal.organization_id
+    _enforce_org_scope(principal, scoped_org)
+    records = _fetch_filtered_assessment_records(scoped_org, participant_id, days)
 
     if not records:
         return DashboardSummaryResponse(
-            organization_id=organization_id,
+            organization_id=scoped_org,
             participant_id=participant_id,
             days=days,
             total_assessments=0,
             unique_participants=0,
             signal_counts={},
+            cei_stage_counts={},
             complexity_outlook_distribution={},
         )
 
     signal_counts: dict[str, int] = {}
     outlook_counts: dict[str, int] = {}
+    cei_stage_counts: dict[str, int] = {}
     for record in records:
         baseline = None
         if record.participant_id is not None:
-            baseline = _fetch_previous_assessment_record(record.participant_id, record.id)
+            baseline = _fetch_previous_assessment_record(
+                record.participant_id, record.organization_id, record.id
+            )
         signal = _derive_trend_signal(record, baseline).prediction_signal
         signal_counts[signal] = signal_counts.get(signal, 0) + 1
+        cei_stage = record.concentration_exposure_stage
+        cei_stage_counts[cei_stage] = cei_stage_counts.get(cei_stage, 0) + 1
 
         outlook = (
             record.leadership_complexity_outlook_90_days.value
@@ -789,16 +1152,19 @@ async def get_dashboard_summary(
     avg_load = round(
         sum(record.leadership_load_index_overall for record in records) / len(records), 2
     )
+    avg_risk_score = round(sum(record.leadership_risk_score for record in records) / len(records), 2)
 
     return DashboardSummaryResponse(
-        organization_id=organization_id,
+        organization_id=scoped_org,
         participant_id=participant_id,
         days=days,
         total_assessments=len(records),
         unique_participants=len(participants),
         avg_lsi_overall=avg_lsi,
         avg_leadership_load_overall=avg_load,
+        avg_leadership_risk_score=avg_risk_score,
         signal_counts=signal_counts,
+        cei_stage_counts=cei_stage_counts,
         complexity_outlook_distribution=outlook_counts,
     )
 
@@ -808,14 +1174,19 @@ async def get_dashboard_timeseries(
     organization_id: str | None = Query(default=None, max_length=120),
     participant_id: str | None = Query(default=None, max_length=120),
     days: int = Query(default=180, ge=1, le=3650),
+    principal: AuthPrincipal = Depends(get_current_principal),
 ) -> DashboardTimeseriesResponse:
-    records = _fetch_filtered_assessment_records(organization_id, participant_id, days)
+    scoped_org = organization_id or principal.organization_id
+    _enforce_org_scope(principal, scoped_org)
+    records = _fetch_filtered_assessment_records(scoped_org, participant_id, days)
 
     points: list[DashboardTimeseriesPoint] = []
     for record in records:
         baseline = None
         if record.participant_id is not None:
-            baseline = _fetch_previous_assessment_record(record.participant_id, record.id)
+            baseline = _fetch_previous_assessment_record(
+                record.participant_id, record.organization_id, record.id
+            )
         trend = _derive_trend_signal(record, baseline)
         points.append(
             DashboardTimeseriesPoint(
@@ -825,12 +1196,14 @@ async def get_dashboard_timeseries(
                 organization_id=record.organization_id,
                 lsi_overall=record.lsi_overall,
                 leadership_load_index_overall=record.leadership_load_index_overall,
+                leadership_risk_score=record.leadership_risk_score,
+                concentration_exposure_stage=record.concentration_exposure_stage,
                 prediction_signal=trend.prediction_signal,
             )
         )
 
     return DashboardTimeseriesResponse(
-        organization_id=organization_id,
+        organization_id=scoped_org,
         participant_id=participant_id,
         days=days,
         points=points,
@@ -842,8 +1215,11 @@ async def get_dashboard_signals(
     organization_id: str | None = Query(default=None, max_length=120),
     participant_id: str | None = Query(default=None, max_length=120),
     days: int = Query(default=90, ge=1, le=3650),
+    principal: AuthPrincipal = Depends(get_current_principal),
 ) -> DashboardSignalsResponse:
-    records = _fetch_filtered_assessment_records(organization_id, participant_id, days)
+    scoped_org = organization_id or principal.organization_id
+    _enforce_org_scope(principal, scoped_org)
+    records = _fetch_filtered_assessment_records(scoped_org, participant_id, days)
 
     latest_by_participant: dict[str, AssessmentRecord] = {}
     for record in records:
@@ -855,7 +1231,9 @@ async def get_dashboard_signals(
 
     items: list[DashboardSignalEntry] = []
     for participant, latest in latest_by_participant.items():
-        baseline = _fetch_previous_assessment_record(participant, latest.id)
+        baseline = _fetch_previous_assessment_record(
+            participant, latest.organization_id, latest.id
+        )
         trend = _derive_trend_signal(latest, baseline)
         items.append(
             DashboardSignalEntry(
@@ -867,6 +1245,8 @@ async def get_dashboard_signals(
                 interpretation=trend.interpretation,
                 lsi_overall=latest.lsi_overall,
                 leadership_load_index_overall=latest.leadership_load_index_overall,
+                leadership_risk_score=latest.leadership_risk_score,
+                concentration_exposure_stage=latest.concentration_exposure_stage,
                 lsi_overall_change=trend.lsi_overall_change,
                 leadership_load_index_overall_change=trend.leadership_load_index_overall_change,
             )
@@ -874,7 +1254,7 @@ async def get_dashboard_signals(
 
     items.sort(key=lambda item: item.assessment_id, reverse=True)
     return DashboardSignalsResponse(
-        organization_id=organization_id,
+        organization_id=scoped_org,
         participant_id=participant_id,
         days=days,
         items=items,

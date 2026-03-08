@@ -3,16 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Leadership Signal Intelligence Platform</title>
+    <title>Leadership Risk Intelligence Platform</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <main class="app-shell">
       <header class="hero">
-        <h1>Leadership Signal Intelligence Platform</h1>
+        <h1>Leadership Risk Intelligence Platform</h1>
         <p class="subtitle">
-          Complete the 35-question assessment and generate scoring + trend
-          insights instantly.
+          Complete the 35-question assessment to generate stability, exposure,
+          and predictive risk intelligence.
         </p>
         <div class="view-toggle">
           <button id="view-assessment-button" class="tab active" type="button">
@@ -23,6 +23,31 @@
           </button>
         </div>
       </header>
+
+      <section class="panel">
+        <h2>Access Control</h2>
+        <div class="meta-grid">
+          <label>
+            Username
+            <input id="auth-username" type="text" maxlength="120" />
+          </label>
+          <label>
+            Password
+            <input id="auth-password" type="password" maxlength="200" />
+          </label>
+          <label>
+            Organization ID
+            <input id="auth-organization-id" type="text" maxlength="120" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="auth-login-button" type="button">Sign in</button>
+          <button id="auth-logout-button" class="secondary" type="button">
+            Sign out
+          </button>
+        </div>
+        <p id="auth-status" class="status idle">Not signed in.</p>
+      </section>
 
       <div id="assessment-view">
         <section class="panel">
@@ -139,6 +164,10 @@
               <ul id="dashboard-signal-counts" class="summary-list"></ul>
             </div>
             <div>
+              <h3>CEI stage distribution</h3>
+              <ul id="dashboard-cei-counts" class="summary-list"></ul>
+            </div>
+            <div>
               <h3>Q35 outlook distribution</h3>
               <ul id="dashboard-outlook-counts" class="summary-list"></ul>
             </div>
@@ -146,7 +175,7 @@
         </section>
 
         <section class="panel">
-          <h2>LSI vs Load over time</h2>
+          <h2>LSI vs Load vs Risk over time</h2>
           <svg id="dashboard-chart" class="dashboard-chart" viewBox="0 0 900 260"></svg>
         </section>
 
@@ -158,8 +187,10 @@
                 <th>Participant</th>
                 <th>Assessment ID</th>
                 <th>Signal</th>
+                <th>CEI Stage</th>
                 <th>LSI</th>
                 <th>Load</th>
+                <th>Risk</th>
                 <th>Δ LSI</th>
                 <th>Δ Load</th>
                 <th>Created</th>
