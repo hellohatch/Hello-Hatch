@@ -19,7 +19,7 @@ The architecture operates across four measurement layers:
 
 This layer measures six leadership capability signals (scores `1..5`):
 
-- Operational Stability
+- Stress Regulation
 - Cognitive Breadth
 - Trust Climate
 - Ethical Integrity
@@ -32,7 +32,7 @@ These signals represent the behavioral infrastructure of leadership stability un
 
 Each leader produces six continuous variables stored over time:
 
-- Operational Stability Score
+- Stress Regulation Score
 - Cognitive Breadth Score
 - Trust Climate Score
 - Ethical Integrity Score

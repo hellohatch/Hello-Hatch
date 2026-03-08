@@ -19,7 +19,7 @@ This document standardizes scoring, interpretation, report structure, and adviso
 
 LSI domains are fixed:
 
-- Operational Stability
+- Stress Regulation
 - Cognitive Breadth
 - Trust Climate
 - Ethical Integrity

@@ -2,20 +2,22 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 import base64
+from html import escape
 import hashlib
 import hmac
 import json
+import math
 import os
 import sqlite3
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
-app = FastAPI(title="Leadership Signal Intelligence Platform API")
+app = FastAPI(title="Leadership Risk Intelligence Platform API")
 
 _signals: list["Signal"] = []
 _next_signal_id = 1
@@ -36,7 +38,7 @@ LIKERT_SCALE: dict[int, str] = {
 }
 
 LSI_DOMAIN_QUESTION_MAP: dict[str, list[int]] = {
-    "Operational Stability": [1, 2, 3, 4],
+    "Stress Regulation": [1, 2, 3, 4],
     "Cognitive Breadth": [5, 6, 7, 8],
     "Trust Climate": [9, 10, 11, 12],
     "Ethical Integrity": [13, 14, 15, 16],
@@ -53,7 +55,7 @@ LEADERSHIP_LOAD_QUESTION_MAP: dict[str, list[int]] = {
 }
 
 LSI_STABILITY_WEIGHTS: dict[str, float] = {
-    "Operational Stability": 0.15,
+    "Stress Regulation": 0.15,
     "Cognitive Breadth": 0.15,
     "Trust Climate": 0.15,
     "Ethical Integrity": 0.15,
@@ -68,25 +70,34 @@ CEI_STAGE_MODIFIERS: dict[str, int] = {
     "Structural Risk": 30,
 }
 
+DOMAIN_DEFINITIONS: dict[str, str] = {
+    "Stress Regulation": "Stress Regulation measures whether your leadership remains calm and deliberate when priorities and pressures compete.",
+    "Cognitive Breadth": "Cognitive Breadth measures how consistently you explore multiple options and perspectives before decisions converge.",
+    "Trust Climate": "Trust Climate measures whether your leadership environment supports candid challenge, dissent, and constructive dialogue.",
+    "Ethical Integrity": "Ethical Integrity measures the consistency with which your decisions remain anchored in principles under pressure.",
+    "Leadership Durability": "Leadership Durability measures whether your leadership pace remains sustainable across repeated cycles of demand.",
+    "Adaptive Capacity": "Adaptive Capacity measures how effectively you adjust direction and help others interpret change without confusion.",
+}
+
 SECTION_1_QUESTIONS: list[tuple[int, str, str]] = [
     (
         1,
-        "Operational Stability",
+        "Stress Regulation",
         "When multiple priorities compete for attention, I remain calm and deliberate in how I approach decisions.",
     ),
     (
         2,
-        "Operational Stability",
+        "Stress Regulation",
         "Even during demanding periods, I am able to think clearly before responding to complex issues.",
     ),
     (
         3,
-        "Operational Stability",
+        "Stress Regulation",
         "When pressure increases, I avoid reacting impulsively and instead pause to consider the broader implications.",
     ),
     (
         4,
-        "Operational Stability",
+        "Stress Regulation",
         "People around me experience my leadership as steady even when situations become complicated.",
     ),
     (
@@ -955,6 +966,220 @@ def _derive_trend_signal(
     )
 
 
+def _score_band(score: float) -> tuple[str, str]:
+    if score >= 4.3:
+        return "Strong signal", "This signal is a reliable strength in your current decision environment."
+    if score >= 3.5:
+        return "Stable signal", "This signal is stable, with room to harden under sustained complexity."
+    if score >= 3.0:
+        return "Early compression", "This signal is showing early compression and should be reinforced before pressure compounds."
+    return "Strained signal", "This signal is strained and should be addressed immediately to reduce structural exposure."
+
+
+def _build_domain_narrative(domain: str, score: float) -> str:
+    label, interpretation = _score_band(score)
+    definition = DOMAIN_DEFINITIONS[domain]
+    return (
+        f"<h4>{escape(domain)} — {score:.2f} ({escape(label)})</h4>"
+        f"<p><strong>What this signal measures:</strong> {escape(definition)}</p>"
+        f"<p><strong>What your score suggests:</strong> {escape(interpretation)}</p>"
+        f"<p><strong>What this likely looks like in your role:</strong> In your week, this typically appears in how you pace decisions, include competing perspectives, and help your teams maintain clarity while complexity rises.</p>"
+        f"<p><strong>What signal compression would look like:</strong> You would likely notice shorter decision cycles, narrower option exploration, and more interpretation pressure routing back to you.</p>"
+        f"<p><strong>Why this matters for the organization:</strong> This signal directly affects how confidently teams interpret uncertainty, escalate decisions, and distribute leadership accountability.</p>"
+    )
+
+
+def _build_radar_svg(lsi_domains: dict[str, float]) -> str:
+    ordered = list(LSI_DOMAIN_QUESTION_MAP.keys())
+    cx = 200
+    cy = 200
+    radius = 130
+
+    points: list[tuple[float, float]] = []
+    labels: list[str] = []
+    for idx, domain in enumerate(ordered):
+        angle = (-math.pi / 2) + (idx * (2 * math.pi / len(ordered)))
+        score = lsi_domains[domain]
+        scaled_r = (score / 5) * radius
+        x = cx + math.cos(angle) * scaled_r
+        y = cy + math.sin(angle) * scaled_r
+        points.append((x, y))
+
+        lx = cx + math.cos(angle) * (radius + 22)
+        ly = cy + math.sin(angle) * (radius + 22)
+        labels.append(
+            f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="11" text-anchor="middle">{escape(domain)}</text>'
+        )
+
+    polyline = " ".join(f"{x:.1f},{y:.1f}" for x, y in points)
+    rings = []
+    for ring in range(1, 6):
+        ring_r = (ring / 5) * radius
+        rings.append(
+            f'<circle cx="{cx}" cy="{cy}" r="{ring_r:.1f}" fill="none" stroke="#d6e0ea" stroke-width="1"/>'
+        )
+    spokes = []
+    for idx in range(len(ordered)):
+        angle = (-math.pi / 2) + (idx * (2 * math.pi / len(ordered)))
+        sx = cx + math.cos(angle) * radius
+        sy = cy + math.sin(angle) * radius
+        spokes.append(
+            f'<line x1="{cx}" y1="{cy}" x2="{sx:.1f}" y2="{sy:.1f}" stroke="#d6e0ea" stroke-width="1"/>'
+        )
+
+    return (
+        '<svg id="leadership-signal-radar" viewBox="0 0 400 420" width="100%" height="340">'
+        + "".join(rings)
+        + "".join(spokes)
+        + f'<polygon points="{polyline}" fill="rgba(36,99,235,0.2)" stroke="#2463eb" stroke-width="2"/>'
+        + "".join(labels)
+        + "</svg>"
+    )
+
+
+def _build_stage_blocks(active_stage: str, element_id: str, title: str) -> str:
+    stages = ["Healthy Distribution", "Exposure", "Concentration", "Structural Risk"]
+    block_width = 180
+    svg_parts = [
+        f'<svg id="{element_id}" viewBox="0 0 760 120" width="100%" height="120">',
+        f'<text x="0" y="16" font-size="14" font-weight="700">{escape(title)}</text>',
+    ]
+    for idx, stage in enumerate(stages):
+        x = idx * (block_width + 8)
+        fill = "#2463eb" if stage == active_stage else "#eff4fa"
+        text_color = "#ffffff" if stage == active_stage else "#2f4359"
+        svg_parts.append(
+            f'<rect x="{x}" y="28" width="{block_width}" height="54" rx="8" fill="{fill}" stroke="#c6d5e4"/>'
+        )
+        svg_parts.append(
+            f'<text x="{x + block_width / 2}" y="60" font-size="12" text-anchor="middle" fill="{text_color}">{escape(stage)}</text>'
+        )
+    svg_parts.append("</svg>")
+    return "".join(svg_parts)
+
+
+def _build_executive_brief_html(
+    record: AssessmentRecord, trend: AssessmentTrendResponse
+) -> str:
+    leader_name = record.participant_id or "Leader"
+    radar_svg = _build_radar_svg(record.lsi_domains)
+    cei_svg = _build_stage_blocks(
+        record.concentration_exposure_stage,
+        "cei-stage-graphic",
+        "Concentration Exposure Index™",
+    )
+    cascade_svg = _build_stage_blocks(
+        record.leadership_cost_cascade_stage,
+        "cost-cascade-graphic",
+        "Leadership Cost Cascade™ Placement",
+    )
+
+    section_1 = (
+        f"Your current leadership profile indicates a CEI stage of {record.concentration_exposure_stage} and a Leadership Risk Score of {record.leadership_risk_score:.2f}. "
+        f"You are operating with Leadership Stability at {record.leadership_stability_score:.2f} and Leadership Load at {record.leadership_load_score:.2f}. "
+        "This combination shows where your leadership system is resilient and where structural dependency can accumulate if demand keeps concentrating."
+    )
+    section_2 = (
+        "Your environment appears to require sustained interpretation across competing priorities. "
+        f"The trend signal is currently {trend.prediction_signal}, and the most recent outlook for role complexity is "
+        f"{record.leadership_complexity_outlook_90_days.value if record.leadership_complexity_outlook_90_days else 'not provided'}. "
+        "In practical terms, your decision context is not just about workload volume; it is about how often your judgment becomes the routing point for organizational clarity."
+    )
+    section_4 = "".join(
+        _build_domain_narrative(domain, score)
+        for domain, score in record.lsi_domains.items()
+    )
+    section_5 = (
+        "Before visible performance issues appear, the clearest early indicators are durability compression, faster decision convergence, and repeated escalation back to your role. "
+        "Your current metrics suggest this risk can be observed and managed proactively, rather than reactively, if distribution of interpretation remains intentional."
+    )
+    section_6 = (
+        "Over the next six to twelve months, risk trajectory depends on whether Leadership Load remains stable relative to your behavioral durability. "
+        "If load rises while durability or cognitive breadth compresses, CEI stage progression can accelerate toward concentration. "
+        "If load is redistributed and decision interpretation broadens, risk can stabilize even in high-complexity conditions."
+    )
+    section_9 = (
+        "Over the next 30 days, focus on three interventions: "
+        "1) map recurring interpretation bottlenecks, "
+        "2) delegate decision framing responsibilities to adjacent leaders, and "
+        "3) protect time blocks for strategic breadth before major decision forums."
+    )
+    section_10 = (
+        "Your signal pattern affects the full system. "
+        "When your role absorbs too much interpretive demand, team-level decision latency and escalation dependency can increase. "
+        "Strengthening distributed interpretation capacity improves resilience, continuity, and succession readiness."
+    )
+    section_11 = (
+        "Your leadership profile shows meaningful capability and a measurable structural signature. "
+        "The strategic opportunity is to preserve your strengths while preventing concentration around your role from becoming a hidden organizational constraint."
+    )
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Executive Insight Brief — Assessment {record.id}</title>
+  <style>
+    body {{ font-family: Arial, Helvetica, sans-serif; margin: 24px; color: #1d2f44; line-height: 1.45; }}
+    h1 {{ margin: 0 0 4px 0; }}
+    h2 {{ margin: 22px 0 8px; border-bottom: 1px solid #dbe4ee; padding-bottom: 6px; }}
+    h3 {{ margin: 16px 0 6px; }}
+    h4 {{ margin: 12px 0 4px; }}
+    .meta {{ color: #4a6078; font-size: 14px; }}
+    .panel {{ border: 1px solid #dbe4ee; border-radius: 10px; padding: 14px; margin-bottom: 14px; background: #fbfdff; }}
+  </style>
+</head>
+<body>
+  <h1>Executive Insight Brief™</h1>
+  <p class="meta">Leader: {escape(leader_name)} | Organization: {escape(record.organization_id or "not provided")} | Assessment ID: {record.id} | Generated: {escape(datetime.now(timezone.utc).isoformat())}</p>
+
+  <h2>1 Executive Structural Overview</h2>
+  <p>{escape(section_1)}</p>
+
+  <h2>2 The Environment You Are Operating In</h2>
+  <p>{escape(section_2)}</p>
+
+  <h2>3 Leadership Signal Profile</h2>
+  <div class="panel">{radar_svg}</div>
+
+  <h2>4 Domain Interpretation and Analysis</h2>
+  <div class="panel">{section_4}</div>
+
+  <h2>5 Snapshot of Risk Before Anything Breaks</h2>
+  <p>{escape(section_5)}</p>
+
+  <h2>6 Six to Twelve Month Structural Projection</h2>
+  <p>{escape(section_6)}</p>
+
+  <h2>7 Concentration Exposure Index</h2>
+  <div class="panel">{cei_svg}</div>
+  <p>Your current CEI stage is <strong>{escape(record.concentration_exposure_stage)}</strong>.</p>
+
+  <h2>8 Leadership Cost Cascade Placement</h2>
+  <div class="panel">{cascade_svg}</div>
+  <p>Your current cascade placement is <strong>{escape(record.leadership_cost_cascade_stage)}</strong>.</p>
+
+  <h2>9 Thirty Day Structural Strengthening Plan</h2>
+  <p>{escape(section_9)}</p>
+
+  <h2>10 Organizational Implications</h2>
+  <p>{escape(section_10)}</p>
+
+  <h2>11 Final Perspective</h2>
+  <p>{escape(section_11)}</p>
+
+  <h2>Appendix A Advisory Integration Pathway</h2>
+  <p>Integrate this brief into weekly decision governance by reviewing load-routing patterns, CEI stage movement, and reinforcement actions with direct reports and peer leaders.</p>
+
+  <h2>Appendix B Leadership Signal Definitions</h2>
+  <ul>
+    {''.join(f"<li><strong>{escape(domain)}:</strong> {escape(text)}</li>" for domain, text in DOMAIN_DEFINITIONS.items())}
+  </ul>
+</body>
+</html>"""
+
+
 configure_database(str(_default_db_path))
 if _frontend_dir.exists():
     app.mount("/static", StaticFiles(directory=str(_frontend_dir)), name="static")
@@ -1101,6 +1326,40 @@ async def get_assessment_trend(
             current.participant_id, current.organization_id, assessment_id
         )
     return _derive_trend_signal(current, baseline)
+
+
+@app.get("/reports/{assessment_id}/executive-brief", response_class=HTMLResponse)
+async def get_executive_brief(
+    assessment_id: int,
+    download: bool = Query(default=False),
+    principal: AuthPrincipal = Depends(get_current_principal),
+) -> HTMLResponse:
+    record = _fetch_assessment_record(assessment_id)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="assessment not found",
+        )
+    if record.organization_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="assessment missing organization scope",
+        )
+    _enforce_org_scope(principal, record.organization_id)
+
+    baseline = None
+    if record.participant_id is not None:
+        baseline = _fetch_previous_assessment_record(
+            record.participant_id, record.organization_id, record.id
+        )
+    trend = _derive_trend_signal(record, baseline)
+    html = _build_executive_brief_html(record, trend)
+    headers = {}
+    if download:
+        headers["Content-Disposition"] = (
+            f'attachment; filename="executive_insight_brief_{assessment_id}.html"'
+        )
+    return HTMLResponse(content=html, headers=headers)
 
 
 @app.get("/dashboard/summary", response_model=DashboardSummaryResponse)
