@@ -1,0 +1,9 @@
+.git
+.gitignore
+.cursor
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+docs/
+*.db

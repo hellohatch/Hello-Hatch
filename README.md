@@ -44,6 +44,33 @@ Dashboard:
 
 Use the `Dashboard` tab in the UI at `http://127.0.0.1:8000/`.
 
+## Go live (Docker)
+
+Build the production image:
+
+`make docker-build`
+
+Run the container:
+
+`docker run -d --name lri-platform -p 8000:8000 -v lri_data:/app/database -e LSI_API_PASSWORD='replace-with-strong-password' -e LSI_JWT_SECRET='replace-with-long-random-secret' -e LSI_TOKEN_TTL_MINUTES=480 leadership-risk-intelligence:latest`
+
+Smoke test:
+
+`curl -sS http://127.0.0.1:8000/health`
+
+Open:
+
+- `http://127.0.0.1:8000/` (frontend + sign in)
+- `http://127.0.0.1:8000/docs` (interactive API docs)
+
+Production checklist:
+
+1. Set strong values for `LSI_API_PASSWORD` and `LSI_JWT_SECRET`.
+2. Persist `/app/database` with a volume (example uses `lri_data`).
+3. Put the container behind TLS (load balancer or reverse proxy).
+4. Restrict network access so only HTTPS traffic is exposed.
+5. Configure routine backups for the SQLite volume.
+
 ## Authentication and organization scope
 
 Assessment and dashboard APIs are protected with bearer tokens and scoped by organization.
@@ -110,6 +137,12 @@ In the browser UI, use the `Access Control` panel to sign in before loading temp
     - `participant_id` (optional)
     - `days` (optional, defaults vary by endpoint)
   - Calls are constrained to the token’s organization scope.
+
+### Reports
+
+- `GET /reports/{assessment_id}/executive-brief`
+  - Generates the Executive Insight Brief™ HTML report with embedded standardized visuals.
+  - Optional query param: `download=true` to return as attachment.
 
 ## Quick verification
 
