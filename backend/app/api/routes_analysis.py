@@ -3,7 +3,7 @@ from app.services.scoring_engine import (
     calculate_lsi,
     calculate_lli,
     calculate_cei,
-    calculate_leadership_risk,
+    calculate_leadership_risk
 )
 
 router = APIRouter()
@@ -11,9 +11,9 @@ router = APIRouter()
 
 @router.post("/analysis/run")
 def run_analysis():
-    responses = [4, 5, 4, 3, 5]
-    load_scores = [3, 3, 4, 4, 3]
-    exposure_scores = [2, 3, 2, 3, 2]
+    responses = [4,5,4,3,5]
+    load_scores = [3,3,4,4,3]
+    exposure_scores = [2,3,2,3,2]
 
     lsi = calculate_lsi(responses)
     lli = calculate_lli(load_scores)
@@ -25,5 +25,5 @@ def run_analysis():
         "LeadershipSignalIndex": lsi,
         "LeadershipLoadIndex": lli,
         "ConcentrationExposureIndex": cei,
-        "LeadershipRiskScore": risk,
+        "LeadershipRiskScore": risk
     }
