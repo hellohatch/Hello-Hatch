@@ -10,5 +10,5 @@ app = FastAPI(
 )
 
 app.include_router(health_router)
-app.include_router(assessment_router)
 app.include_router(analysis_router)
+app.include_router(assessment_router)
