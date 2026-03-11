@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 
+from backend.app.api.health import router as health_router
+
 app = FastAPI(title="Leadership Signal Intelligence Platform API")
 
 
@@ -10,7 +12,4 @@ def root() -> dict[str, str]:
         "status": "running",
     }
 
-
-@app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+app.include_router(health_router)
