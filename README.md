@@ -1,228 +1,124 @@
-# Leadership Risk Intelligence™ Platform
-**Version 3.0 | Hatch | March 2026**
+# Leadership Risk Intelligence™ Platform v3.1
 
-> A production-ready SaaS platform that detects structural leadership risk before performance decline — operationalising the Leadership Risk Intelligence™ framework.
-
----
-
-## 🚀 Live Platform
-
-| URL | Description |
-|-----|-------------|
-| `/login` | Sign in |
-| `/dashboard` | Leader Intelligence Dashboard |
-| `/org` | Organization Portfolio View |
-| `/assessment/new` | Start 36-item assessment |
-| `/api/docs` | API Documentation |
-| `/api/health` | Platform health check |
-
-**Demo Credentials:**
-- Admin: `admin@demo.com` / `password123`
-- Leaders: `sarah@demo.com`, `james@demo.com`, `priya@demo.com`, `david@demo.com` / `Welcome2026!`
+> Predictive SaaS platform that detects structural leadership risk **before** performance decline.
 
 ---
 
-## ✅ Completed Features
+## 🌐 Live URLs
 
-### Assessment Engine
-- 36-item psychometric instrument (30 signal + 5 load + 1 orientation)
-- 6 signal domains × 5 questions each, plus reverse-scored items
-- Live progress bar, domain completion tracking
-- CEI data capture (optional manual input)
+| Endpoint | URL |
+|---|---|
+| **Platform** | https://3000-ii3oqi39o793it57sowde-a402f90a.sandbox.novita.ai |
+| **API Health** | https://3000-ii3oqi39o793it57sowde-a402f90a.sandbox.novita.ai/api/health |
+| **Formula Reference** | https://3000-ii3oqi39o793it57sowde-a402f90a.sandbox.novita.ai/api/formulas |
+| **API Docs** | https://3000-ii3oqi39o793it57sowde-a402f90a.sandbox.novita.ai/api/docs |
 
-### Analytic Engine — 5-Layer Flow
-1. **Leadership Signal Index™ (LSI)** — domain scores averaged → range 1.0–5.0
-2. **Leadership Load Index™ (LLI)** — raw + normalized (0–1)
-3. **Concentration Exposure Index™ (CEI)** — decision routing ratio
-4. **Leadership Cost Cascade™** — 5-stage classification
-5. **Leadership Risk Score™** — `(CEI × LLI_norm) / LSI`
+**Demo login:** `admin@demo.com` / `password123`
 
-### Signal Pattern Classification (4 patterns)
-- Organizational Stabilizer
-- Strategic Interpreter
-- Structural Bottleneck Risk
-- Leadership Load Saturation
+---
 
-### Leader Dashboard
-- Investor visual: Signal → Load → Concentration → Risk
-- Signal Radar chart (Chart.js)
-- Leadership Cost Cascade™ visualization
-- Risk Score breakdown panel
-- Risk Score™ & LSI trajectory charts
-- Assessment history table
-- Link to Executive Intelligence Brief
+## ✅ v3.1 Completed Features
 
-### Executive Intelligence Brief (full report)
-- Header with composite Risk Score™
-- Signal Pattern classification
-- Strongest signal & watch area
-- Leadership Signal Radar + Scorecard
-- Leadership Cost Cascade™ staircase visualization
-- Signal Domain Analysis with interpretive text
-- Leadership Signal Trajectory™ (3 scenario model)
-- Concentration Exposure Interpretation with CEI gauge
-- 30-Day Structural Strengthening Plan (pattern-specific)
-- Organizational Implications
-- Final Perspective narrative
-- Print / PDF ready
+### Scoring Engine (v3.1 — Venture-Grade Corrections)
+| Model | Formula | Range |
+|---|---|---|
+| **LSI™** | `(SR + CB + TC + EI + LD + AC) / 6` | 1.0–5.0 |
+| **LSI_norm** *(NEW v3.1)* | `LSI / 5` | 0.0–1.0 |
+| **LLI_norm** | `(LLI_raw - 1) / 4` | 0.0–1.0 |
+| **CEI** | `leader_decisions / total_decisions` | 0.0–1.0 |
+| **Risk Score** *(v3.1 CORRECTED)* | `(CEI × LLI_norm) / LSI_norm` | 0.0–∞ |
+| **Decision Velocity** *(NEW v3.1)* | `total_decisions / days_elapsed` | decisions/day |
 
-### Organization Dashboard
-- KPI row (leaders, assessed, avg risk, at-risk count)
-- Risk Level Distribution doughnut chart
-- Leadership Cost Cascade™ distribution bars
-- Domain Signal Heatmap (org average per domain)
-- Leadership Risk Map table (sorted by risk)
-- Leader deep-dive page with radar + trajectory
-- Add Leader modal (admin only)
+> **v3.1 Correction:** Denominator changed from raw LSI (1–5 scale) to LSI_norm (0–1 scale), aligning all three formula variables to the same range for mathematical consistency and improved signal power.
 
-### REST API
+### Risk Thresholds (v3.1 Recalibrated)
+| Risk Score | Level | Cascade Stage |
+|---|---|---|
+| 0.000–0.030 | Low structural risk | Healthy Distribution |
+| 0.031–0.080 | Early exposure | Emerging Exposure |
+| 0.081–0.150 | Emerging dependency | Structural Dependency |
+| 0.151–0.300 | Structural bottleneck | Decision Bottleneck |
+| > 0.300 | Organizational risk | Organizational Drag |
+
+> **v3.1 Correction:** Cost Cascade stage is now classified by **Risk Score** (not CEI alone), reflecting true structural risk as a composite of signals, load, and concentration.
+
+### Demo Portfolio Distribution
+| Leader | Risk Score | Level | Cascade |
+|---|---|---|---|
+| James Rivera | 0.220 | Structural bottleneck | Decision Bottleneck |
+| David Park | 0.120 | Emerging dependency | Structural Dependency |
+| Alex Morgan | 0.100 | Emerging dependency | Structural Dependency |
+| Priya Kapoor | 0.055 | Early exposure | Emerging Exposure |
+| Sarah Chen | 0.018 | Low structural risk | Healthy Distribution |
+
+### Dashboards
+- **Leader Dashboard** — Signal Radar (Chart.js), Leadership Load, Decision Concentration, **Decision Velocity** (NEW), Cost Cascade (Risk Score–driven), Signal Pattern, Risk Breakdown, Trend Charts, Assessment History
+- **Organization Dashboard** — Decision Gravity Map™ (Canvas network visualization), Portfolio Risk Distribution (stacked bar + doughnut), Organizational Risk Heatmap™ (by role level: C-Suite, VP, Director), Leadership Cost Cascade distribution, Domain Signal Heatmap, Decision Velocity panel
+- **Executive Intelligence Brief** — 10-section full report with Signal Radar, domain analysis, trajectory scenarios, 30-day plan, organizational implications (PDF-printable)
+
+### REST API Endpoints
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/health` | Platform status |
-| GET | `/api/formulas` | Scoring formula reference |
-| GET | `/api/docs` | API documentation |
-| POST | `/api/signals/calculate` | Calculate LSI from raw responses |
-| POST | `/api/risk/calculate` | Calculate Risk Score from indices |
-| GET | `/api/leader/:id/brief` | Structured executive brief JSON |
-| GET | `/api/org/portfolio` | Portfolio aggregation (admin) |
-| POST | `/api/decisions/ingest` | Ingest decision events for CEI |
-
-### Security & Auth
-- Cookie-based sessions (HttpOnly, SameSite=Lax)
-- SHA-256 password hashing (Web Crypto API)
-- Role-based access (admin / leader)
-- 24-hour session expiry
+|---|---|---|
+| `POST` | `/api/signals/calculate` | Compute domain scores + LSI |
+| `POST` | `/api/risk/calculate` | Compute LLI, CEI, Risk Score v3.1 |
+| `GET` | `/api/leader/:id/brief` | Full JSON executive brief |
+| `GET` | `/api/org/portfolio` | Org-level aggregated risk data |
+| `GET` | `/api/formulas` | Formula reference with v3.1 corrections |
+| `GET` | `/api/health` | Health check |
+| `GET` | `/api/docs` | Interactive API documentation |
 
 ---
 
-## 📊 Scoring Formulas
+## 🏗️ Architecture
 
+### Tech Stack
+- **Runtime:** Hono framework + Cloudflare Workers/Pages
+- **Database:** Cloudflare D1 (SQLite, edge-distributed)
+- **Frontend:** Tailwind CSS + Chart.js + Custom Canvas (Gravity Map)
+- **Auth:** Session cookie + password hashing (Web Crypto API)
+- **Build:** Vite + TypeScript → Cloudflare Workers bundle
+
+### Data Model
 ```
-Domain Score = Sum(domain_responses) / 5        → range 1.0–5.0
-LSI          = (SR+CB+TC+EI+LD+AC) / 6         → range 1.0–5.0
-LLI_raw      = Sum(load_responses) / 5          → range 1.0–5.0
-LLI_norm     = (LLI_raw - 1) / 4               → range 0.0–1.0
-CEI          = leader_decisions / total_decisions → range 0.0–1.0
-Risk Score   = (CEI × LLI_norm) / LSI
-```
-
-**Risk Bands:**
-| Range | Level |
-|-------|-------|
-| 0.000–0.050 | Low structural risk |
-| 0.051–0.100 | Early exposure |
-| 0.101–0.200 | Emerging dependency |
-| 0.201–0.350 | Structural bottleneck |
-| > 0.350 | Organizational risk |
-
-**CEI / Cascade Thresholds:**
-| CEI Range | Stage |
-|-----------|-------|
-| 0.00–0.30 | Healthy Distribution |
-| 0.31–0.45 | Emerging Exposure |
-| 0.46–0.65 | Structural Dependency |
-| 0.66–0.80 | Decision Bottleneck |
-| 0.81–1.00 | Organizational Drag |
-
----
-
-## 🗄️ Data Architecture
-
-**Storage:** Cloudflare D1 (SQLite)
-
-**Tables:**
-- `organizations` — org profile
-- `leaders` — users, roles, auth
-- `assessments` — assessment instances
-- `assessment_responses` — individual question responses (Q01–Q35)
-- `decision_events` — routing data for CEI
-- `strategic_initiatives` — initiative tracking
-- `risk_scores` — computed scores per assessment
-
----
-
-## 🏗️ Technology Stack
-
-| Layer | Technology |
-|-------|------------|
-| Runtime | Cloudflare Workers (edge) |
-| Framework | Hono v4 |
-| Build | Vite + @hono/vite-cloudflare-pages |
-| Database | Cloudflare D1 (SQLite) |
-| Frontend | HTML + Tailwind CSS CDN + Chart.js CDN |
-| Auth | Web Crypto API (SHA-256, cookie sessions) |
-| Deployment | Cloudflare Pages |
-
----
-
-## 📁 Project Structure
-
-```
-webapp/
-├── src/
-│   ├── index.tsx          # Main app + API docs + favicon
-│   ├── routes/
-│   │   ├── auth.ts        # Login, register, logout
-│   │   ├── assessment.ts  # 36-item instrument + scoring pipeline
-│   │   ├── dashboard.ts   # Leader intelligence dashboard
-│   │   ├── org.ts         # Organization portfolio + leader deep-dive
-│   │   └── api.ts         # REST API endpoints
-│   ├── lib/
-│   │   ├── auth.ts        # Crypto, sessions, middleware
-│   │   ├── questions.ts   # 36-item question bank + domain metadata
-│   │   ├── scoring.ts     # Full scoring engine (all 4 models)
-│   │   └── brief.ts       # Executive Intelligence Brief generator
-│   └── types/
-│       └── index.ts       # TypeScript types + interfaces
-├── migrations/
-│   └── 0001_lri_schema.sql
-├── seed.sql               # 5-leader demo data (4 signal patterns)
-├── ecosystem.config.cjs   # PM2 config
-└── wrangler.jsonc         # Cloudflare config
+organizations → leaders → assessments → assessment_responses
+                       ↓
+                  risk_scores (LSI, LSI_norm, LLI, CEI, Risk Score, Cascade)
+decision_events (for live CEI + Decision Velocity)
+strategic_initiatives
 ```
 
----
-
-## 🎯 Demo Data — Pre-loaded Leaders
-
-| Leader | Role | Risk Score | Risk Level | Signal Pattern |
-|--------|------|-----------|------------|----------------|
-| James Rivera | VP Engineering | 0.236 | Structural bottleneck | Leadership Load Saturation |
-| David Park | VP Sales | 0.112 | Emerging dependency | Structural Bottleneck Risk |
-| Alex Morgan | CEO | 0.111 | Emerging dependency | Structural Bottleneck Risk |
-| Priya Kapoor | Director Ops | 0.072 | Early exposure | Strategic Interpreter |
-| Sarah Chen | CPO | 0.021 | Low structural risk | Organizational Stabilizer |
+### Assessment Instrument
+- **36 questions total:** 30 signal items (6 domains × 5 Qs), 5 load items, 1 orientation
+- **~6 minutes** completion time
+- **Reverse-scored items:** Q04, Q09, Q14, Q18, Q23, Q25, Q28, Q30
 
 ---
 
-## 🔮 Implementation Phases (from SoW)
+## 🛣️ Implementation Roadmap
 
-- [x] **Phase 1** — Assessment Engine, Signal Index, Executive Brief
-- [x] **Phase 2** — Load Index, Risk Score Engine
-- [x] **Phase 3** — Decision routing ingestion, Exposure Index (CEI)
-- [ ] **Phase 4** — Predictive analytics layer (ML forecasting)
-
----
-
-## 🚢 Deployment
-
-**Platform:** Cloudflare Pages  
-**Status:** ✅ Active (sandbox)  
-**Branch:** main  
-**Last Updated:** March 2026
-
-### Deploy to Production
-
-```bash
-npx wrangler d1 create lri-production
-# Update database_id in wrangler.jsonc
-npx wrangler d1 migrations apply lri-production
-npm run build
-npx wrangler pages deploy dist --project-name lri-platform
-```
+| Phase | Status | Description |
+|---|---|---|
+| **Phase 1** | ✅ Complete | Assessment Engine, Signal Index, Executive Brief |
+| **Phase 2** | ✅ Complete | Load Index, Risk Score Engine, v3.1 corrections |
+| **Phase 3** | ✅ Complete | Decision Gravity Map, Portfolio Analytics, Heatmap, Velocity |
+| **Phase 4** | 🔲 Pending | Predictive analytics layer, longitudinal ML models |
 
 ---
 
-## ⚠️ IP Notice
+## 🔐 Demo Credentials
+| Role | Email | Password |
+|---|---|---|
+| Admin | `admin@demo.com` | `password123` |
+| Leader | `sarah@demo.com` | `password123` |
+| Leader | `james@demo.com` | `password123` |
 
-All algorithms, scoring frameworks, trademarked names (Leadership Signal Index™, Leadership Load Index™, Concentration Exposure Index™, Leadership Cost Cascade™, Leadership Risk Score™, Leadership Signal Trajectory™), and associated IP remain the exclusive property of **Hatch**.
+Default password for new leaders: `Welcome2026!`
+
+---
+
+## 📐 Deployment
+
+- **Platform:** Cloudflare Pages
+- **Status:** ✅ Active (Sandbox)
+- **Last Updated:** March 14, 2026
+- **Version:** v3.1 (venture-grade corrections applied)
