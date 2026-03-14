@@ -1,512 +1,310 @@
-// Leadership Signal Index™ — Signal Scoring Engine (Core IP)
-// Multi-Layer Signal Evaluation Engine
+// Leadership Risk Intelligence™ — Scoring Engine v3.0
+// Implements exact formulas from Engineering Architecture Specification v3.0
 
 import type {
-  Domain,
-  Band,
-  RiskTier,
-  InterventionType,
-  IndexScore,
-  SignalScores,
-  InterventionPlan,
-  TierDefinition,
+  SignalDomain, SignalPattern, CascadeStage, RiskLevel,
+  TrajectoryDirection, RiskScoreResult,
 } from '../types/index.js';
-import { QUESTIONS } from './questions.js';
+import { QUESTIONS, DOMAIN_META, DOMAIN_KEYS } from './questions.js';
 
-// ──────────────────────────────────────────────
-// CONSTANTS
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// MODEL 1: LEADERSHIP SIGNAL INDEX™
+// Domain Score = Sum(domain responses) / 5   → range 1.0–5.0
+// LSI = (SR + CB + TC + EI + LD + AC) / 6   → range 1.0–5.0
+// ─────────────────────────────────────────────────────────────
 
-export const BAND_THRESHOLDS: Record<Band, [number, number]> = {
-  Exceptional:  [90, 100],
-  Strong:       [75, 89],
-  Adequate:     [60, 74],
-  Developing:   [45, 59],
-  'At-Risk':    [30, 44],
-  Critical:     [0, 29],
-};
+export function computeDomainScore(
+  domain: SignalDomain,
+  responses: Map<string, number>
+): number {
+  const domainQs = QUESTIONS.filter(q => q.domain === domain && q.scored);
+  if (domainQs.length === 0) return 0;
 
-export const TIER_DEFINITIONS: TierDefinition[] = [
+  let sum = 0;
+  for (const q of domainQs) {
+    const raw = responses.get(q.id) ?? 3; // default neutral
+    // Reverse-scored items: 6 - value  (so 5→1, 4→2, 3→3, 2→4, 1→5)
+    const value = q.reverse ? (6 - raw) : raw;
+    sum += value;
+  }
+
+  return parseFloat((sum / domainQs.length).toFixed(3));
+}
+
+export function computeLSI(domainScores: Record<SignalDomain, number>): number {
+  const values = DOMAIN_KEYS.map(k => domainScores[k]);
+  const lsi = values.reduce((a, b) => a + b, 0) / values.length;
+  return parseFloat(lsi.toFixed(3));
+}
+
+// ─────────────────────────────────────────────────────────────
+// DOMAIN VARIANCE — for Signal Pattern classification
+// variance = stddev(domain_scores)
+// ─────────────────────────────────────────────────────────────
+export function computeDomainVariance(domainScores: Record<SignalDomain, number>): number {
+  const values = DOMAIN_KEYS.map(k => domainScores[k]);
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const variance = values.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / values.length;
+  return parseFloat(Math.sqrt(variance).toFixed(3)); // returning stddev
+}
+
+// ─────────────────────────────────────────────────────────────
+// MODEL 2: LEADERSHIP LOAD INDEX™
+// LLI_raw  = Sum(load_responses) / 5        → range 1.0–5.0
+// LLI_norm = (LLI_raw - 1) / 4             → range 0.0–1.0
+// ─────────────────────────────────────────────────────────────
+export function computeLLI(responses: Map<string, number>): {
+  lli_raw: number;
+  lli_norm: number;
+} {
+  const loadQs = QUESTIONS.filter(q => q.domain === 'load' && q.scored);
+  let sum = 0;
+  for (const q of loadQs) {
+    sum += responses.get(q.id) ?? 3;
+  }
+  const lli_raw  = parseFloat((sum / loadQs.length).toFixed(3));
+  const lli_norm = parseFloat(((lli_raw - 1) / 4).toFixed(3));
+  return { lli_raw, lli_norm };
+}
+
+// ─────────────────────────────────────────────────────────────
+// MODEL 3: CONCENTRATION EXPOSURE INDEX™
+// CEI = leader_decisions / total_decisions  → range 0.0–1.0
+// ─────────────────────────────────────────────────────────────
+export function computeCEI(
+  leaderDecisions: number,
+  totalDecisions: number
+): number {
+  if (totalDecisions === 0) return 0.35; // default to Emerging Exposure if unknown
+  return parseFloat((leaderDecisions / totalDecisions).toFixed(3));
+}
+
+// ─────────────────────────────────────────────────────────────
+// MODEL 4: LEADERSHIP COST CASCADE™
+// Stage determined by CEI thresholds
+// ─────────────────────────────────────────────────────────────
+export const CASCADE_STAGES: Array<{
+  level: number;
+  stage: CascadeStage;
+  range: [number, number];
+  color: string;
+  bg: string;
+  textColor: string;
+  description: string;
+}> = [
   {
-    tier: 'Green',
-    label: 'Leadership Ready',
-    range: [75, 100],
+    level: 1,
+    stage: 'Healthy Distribution',
+    range: [0.00, 0.30],
     color: '#10B981',
-    bg: 'bg-emerald-50',
-    text: 'text-emerald-800',
-    description: 'Signal integrity is high. No significant concentration or drift detected. Leadership capacity is functioning within healthy parameters.',
+    bg: '#ECFDF5',
+    textColor: '#065F46',
+    description: 'Decision load is well distributed. Leadership capacity is not structurally constrained.',
   },
   {
-    tier: 'Yellow',
-    label: 'Monitor & Develop',
-    range: [55, 74],
+    level: 2,
+    stage: 'Emerging Exposure',
+    range: [0.31, 0.45],
+    color: '#84CC16',
+    bg: '#F7FEE7',
+    textColor: '#365314',
+    description: 'Early concentration signals appearing. Preventative attention is warranted.',
+  },
+  {
+    level: 3,
+    stage: 'Structural Dependency',
+    range: [0.46, 0.65],
     color: '#F59E0B',
-    bg: 'bg-amber-50',
-    text: 'text-amber-800',
-    description: 'Some domain softness detected. No acute risk, but preventative attention is warranted to avoid drift acceleration.',
+    bg: '#FFFBEB',
+    textColor: '#78350F',
+    description: 'Organization is structurally dependent on this leader for decision resolution.',
   },
   {
-    tier: 'Orange',
-    label: 'Active Intervention',
-    range: [35, 54],
+    level: 4,
+    stage: 'Decision Bottleneck',
+    range: [0.66, 0.80],
     color: '#F97316',
-    bg: 'bg-orange-50',
-    text: 'text-orange-800',
-    description: 'Multiple domains showing concentration signatures. Corrective intervention is recommended before structural breakdown occurs.',
+    bg: '#FFF7ED',
+    textColor: '#7C2D12',
+    description: 'Decision throughput is critically constrained. Organizational velocity is compromised.',
   },
   {
-    tier: 'Red',
-    label: 'Critical Risk',
-    range: [0, 34],
+    level: 5,
+    stage: 'Organizational Drag',
+    range: [0.81, 1.00],
     color: '#EF4444',
-    bg: 'bg-red-50',
-    text: 'text-red-800',
-    description: 'Acute leadership risk detected. Convergence of multiple failure signals. Urgent advisory engagement required.',
+    bg: '#FEF2F2',
+    textColor: '#7F1D1D',
+    description: 'Decision concentration is creating measurable organizational drag and systemic risk.',
   },
 ];
 
-// ──────────────────────────────────────────────
-// CALIBRATION CURVES BY ORG STAGE
-// Contextual Calibration Engine
-// ──────────────────────────────────────────────
-const STAGE_CALIBRATION: Record<string, Record<Domain, number>> = {
-  early_vc: {
-    operational: 0.85, // Lower bar: early stage expects concentration
-    cognitive:   1.10, // Higher expectation: founders need broad thinking
-    ethical:     1.00,
-    trust:       0.90,
-    adaptive:    1.15, // Critical in early stage
-    durability:  0.90,
+export function computeCascadeStage(cei: number): {
+  stage: CascadeStage;
+  level: number;
+  stageMeta: typeof CASCADE_STAGES[0];
+} {
+  const stageMeta = CASCADE_STAGES.find(
+    s => cei >= s.range[0] && cei <= s.range[1]
+  ) ?? CASCADE_STAGES[CASCADE_STAGES.length - 1];
+  return { stage: stageMeta.stage, level: stageMeta.level, stageMeta };
+}
+
+// ─────────────────────────────────────────────────────────────
+// LEADERSHIP RISK SCORE™
+// Risk Score = (CEI × LLI_norm) / LSI
+// ─────────────────────────────────────────────────────────────
+export function computeRiskScore(lsi: number, lli_norm: number, cei: number): number {
+  if (lsi === 0) return 0;
+  return parseFloat(((cei * lli_norm) / lsi).toFixed(4));
+}
+
+export const RISK_LEVELS: Array<{
+  level: RiskLevel;
+  range: [number, number];
+  color: string;
+  bg: string;
+  textColor: string;
+}> = [
+  { level: 'Low structural risk',    range: [0,     0.050], color: '#10B981', bg: '#ECFDF5', textColor: '#065F46' },
+  { level: 'Early exposure',         range: [0.051, 0.100], color: '#84CC16', bg: '#F7FEE7', textColor: '#365314' },
+  { level: 'Emerging dependency',    range: [0.101, 0.200], color: '#F59E0B', bg: '#FFFBEB', textColor: '#78350F' },
+  { level: 'Structural bottleneck',  range: [0.201, 0.350], color: '#F97316', bg: '#FFF7ED', textColor: '#7C2D12' },
+  { level: 'Organizational risk',    range: [0.351, 999],   color: '#EF4444', bg: '#FEF2F2', textColor: '#7F1D1D' },
+];
+
+export function classifyRiskLevel(riskScore: number): RiskLevel {
+  const match = RISK_LEVELS.find(r => riskScore >= r.range[0] && riskScore <= r.range[1]);
+  return match?.level ?? 'Organizational risk';
+}
+
+export function getRiskLevelMeta(riskScore: number) {
+  return RISK_LEVELS.find(r => riskScore >= r.range[0] && riskScore <= r.range[1]) ?? RISK_LEVELS[RISK_LEVELS.length - 1];
+}
+
+// ─────────────────────────────────────────────────────────────
+// SIGNAL PATTERN CLASSIFICATION
+// Based on LSI, domain variance, LLI, CEI
+// ─────────────────────────────────────────────────────────────
+export const SIGNAL_PATTERN_META: Record<SignalPattern, {
+  description: string;
+  color: string;
+  icon: string;
+  implication: string;
+}> = {
+  'Organizational Stabilizer': {
+    description: 'High LSI with low domain variance. Signals are strong and consistent across all domains.',
+    color: '#10B981',
+    icon: 'anchor',
+    implication: 'This leader creates organizational stability. Structural risk is low when load and exposure are managed.',
   },
-  growth_vc: {
-    operational: 1.00,
-    cognitive:   1.05,
-    ethical:     1.00,
-    trust:       1.05,
-    adaptive:    1.05,
-    durability:  1.00,
+  'Strategic Interpreter': {
+    description: 'High Cognitive Breadth combined with High Ethical Integrity. Strong translational leadership capability.',
+    color: '#6366F1',
+    icon: 'lightbulb',
+    implication: 'This leader excels at converting ambiguity into organizational direction. Watch for load saturation.',
   },
-  enterprise: {
-    operational: 1.10, // Delegation expected at enterprise level
-    cognitive:   1.00,
-    ethical:     1.10, // Higher ethical standard
-    trust:       1.10, // Psychological safety critical
-    adaptive:    0.95,
-    durability:  1.05,
+  'Structural Bottleneck Risk': {
+    description: 'High Load combined with rising Concentration Exposure. Decision routing is centralizing.',
+    color: '#F97316',
+    icon: 'triangle-exclamation',
+    implication: 'Decision concentration is structurally compressing the organization. Delegation architecture is needed.',
+  },
+  'Leadership Load Saturation': {
+    description: 'High Load combined with Low Durability score. Capacity erosion is accelerating.',
+    color: '#EF4444',
+    icon: 'battery-quarter',
+    implication: 'Leadership capacity is approaching saturation. Without structural relief, performance decline is probable.',
   },
 };
 
-// ──────────────────────────────────────────────
-// MODULE 1: DOMAIN SCORING ENGINE
-// Weighted item aggregation + anchor item prioritization
-// ──────────────────────────────────────────────
-function computeDomainRawScore(
-  domain: Domain,
-  responses: Map<string, number>
-): { raw: number; anchorBonus: number } {
-  const domainQuestions = QUESTIONS.filter(q => q.domain === domain);
-  let weightedSum = 0;
-  let totalWeight = 0;
-  let anchorBonus = 0;
+export function classifySignalPattern(
+  domainScores: Record<SignalDomain, number>,
+  lsi: number,
+  domainVariance: number,
+  lli_norm: number,
+  cei: number
+): SignalPattern {
+  const ld = domainScores.leadership_durability;
+  const cb = domainScores.cognitive_breadth;
+  const ei = domainScores.ethical_integrity;
 
-  for (const q of domainQuestions) {
-    const rawVal = responses.get(q.id);
-    if (rawVal === undefined) continue;
-
-    // Normalize to 0-100 (from 1-7 scale)
-    const normalized = ((rawVal - 1) / 6) * 100;
-    const value = q.is_reverse ? (100 - normalized) : normalized;
-
-    // Anchor item gets 20% weight boost
-    const effectiveWeight = q.is_anchor ? q.weight * 1.2 : q.weight;
-
-    weightedSum += value * effectiveWeight;
-    totalWeight += effectiveWeight;
-
-    // Track anchor divergence for coherence scoring
-    if (q.is_anchor) {
-      anchorBonus += value;
-    }
-  }
-
-  const anchorCount = domainQuestions.filter(q => q.is_anchor).length;
-  return {
-    raw: totalWeight > 0 ? weightedSum / totalWeight : 50,
-    anchorBonus: anchorCount > 0 ? anchorBonus / anchorCount : 50,
-  };
+  // Priority order matters
+  if (lli_norm >= 0.55 && ld < 3.0) return 'Leadership Load Saturation';
+  if (lli_norm >= 0.5  && cei >= 0.46) return 'Structural Bottleneck Risk';
+  if (lsi >= 3.8 && domainVariance < 0.5) return 'Organizational Stabilizer';
+  if (cb >= 3.8 && ei >= 3.8) return 'Strategic Interpreter';
+  // Default to the most concerning pattern if none match well
+  if (lli_norm >= 0.5) return 'Structural Bottleneck Risk';
+  return 'Organizational Stabilizer';
 }
 
-// ──────────────────────────────────────────────
-// MODULE 2: COHERENCE SCORING
-// Cross-item consistency + confidence rating
-// ──────────────────────────────────────────────
-function computeCoherence(
-  domain: Domain,
-  responses: Map<string, number>
-): { consistency: number; confidence: number } {
-  const domainQuestions = QUESTIONS.filter(q => q.domain === domain);
-  const values: number[] = [];
-
-  for (const q of domainQuestions) {
-    const rawVal = responses.get(q.id);
-    if (rawVal === undefined) continue;
-    const normalized = ((rawVal - 1) / 6) * 100;
-    values.push(q.is_reverse ? (100 - normalized) : normalized);
-  }
-
-  if (values.length < 2) return { consistency: 0.5, confidence: 0.5 };
-
-  // Standard deviation-based consistency: lower spread = higher consistency
-  const mean = values.reduce((a, b) => a + b, 0) / values.length;
-  const variance = values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / values.length;
-  const stdDev = Math.sqrt(variance);
-
-  // Consistency: StdDev 0 = 1.0, StdDev 50 = 0.0
-  const consistency = Math.max(0, Math.min(1, 1 - (stdDev / 50)));
-
-  // Confidence also penalizes extreme responding
-  const extremeCount = values.filter(v => v <= 5 || v >= 95).length;
-  const extremePenalty = extremeCount / values.length;
-  const confidence = Math.max(0.2, consistency - (extremePenalty * 0.3));
-
-  return { consistency, confidence };
+// ─────────────────────────────────────────────────────────────
+// TRAJECTORY DIRECTION
+// Compares current risk score to historical average
+// ─────────────────────────────────────────────────────────────
+export function computeTrajectory(
+  currentRiskScore: number,
+  historicalScores: number[]
+): TrajectoryDirection {
+  if (historicalScores.length === 0) return 'Stable';
+  const avgHistorical = historicalScores.reduce((a, b) => a + b, 0) / historicalScores.length;
+  const delta = currentRiskScore - avgHistorical;
+  if (delta < -0.01) return 'Improving';
+  if (delta > 0.01)  return 'Declining';
+  return 'Stable';
 }
 
-// ──────────────────────────────────────────────
-// MODULE 3: CONTEXTUAL CALIBRATION ENGINE
-// Stage-based normalization
-// ──────────────────────────────────────────────
-function applyContextualCalibration(
-  rawScore: number,
-  domain: Domain,
-  orgStage: string
-): number {
-  const multiplier = STAGE_CALIBRATION[orgStage]?.[domain] ?? 1.0;
-  // Apply multiplier then clamp to 0-100
-  return Math.max(0, Math.min(100, rawScore * multiplier));
-}
-
-// ──────────────────────────────────────────────
-// MODULE 4: BAND CLASSIFIER
-// ──────────────────────────────────────────────
-function classifyBand(score: number): Band {
-  for (const [band, [min, max]] of Object.entries(BAND_THRESHOLDS) as [Band, [number, number]][]) {
-    if (score >= min && score <= max) return band;
-  }
-  return 'Critical';
-}
-
-// ──────────────────────────────────────────────
-// MODULE 5: CONVERGENCE DETECTION MODULE
-// Cross-domain convergence flags
-// ──────────────────────────────────────────────
-function detectConvergence(domainScores: Record<Domain, number>): {
-  convergence_flag: boolean;
-  concentration_signature: boolean;
-  drift_acceleration: boolean;
-  protective_buffer: boolean;
-} {
-  const scores = Object.values(domainScores);
-  const lowDomains = scores.filter(s => s < 50).length;
-  const criticalDomains = scores.filter(s => s < 35).length;
-  const highDomains = scores.filter(s => s >= 75).length;
-
-  // Concentration signature: 3+ domains below 50
-  const concentration_signature = lowDomains >= 3;
-
-  // Convergence flag: 2+ domains critically low
-  const convergence_flag = criticalDomains >= 2;
-
-  // Drift acceleration: spread between best and worst > 40 points (imbalance)
-  const spread = Math.max(...scores) - Math.min(...scores);
-  const drift_acceleration = spread > 40 && lowDomains >= 2;
-
-  // Protective buffer: 3+ domains above 75 (acts as buffer against risk)
-  const protective_buffer = highDomains >= 3;
-
-  return { convergence_flag, concentration_signature, drift_acceleration, protective_buffer };
-}
-
-// ──────────────────────────────────────────────
-// MODULE 6: TIER ASSIGNMENT ENGINE
-// ──────────────────────────────────────────────
-function assignTier(
-  composite: number,
-  convergenceFlags: ReturnType<typeof detectConvergence>
-): { tier: RiskTier; tier_label: string } {
-  let adjustedComposite = composite;
-
-  // Convergence penalties
-  if (convergenceFlags.convergence_flag) adjustedComposite -= 10;
-  if (convergenceFlags.concentration_signature) adjustedComposite -= 5;
-  if (convergenceFlags.drift_acceleration) adjustedComposite -= 5;
-
-  // Protective buffer bonus
-  if (convergenceFlags.protective_buffer) adjustedComposite += 5;
-
-  adjustedComposite = Math.max(0, Math.min(100, adjustedComposite));
-
-  const tierDef = TIER_DEFINITIONS.find(
-    t => adjustedComposite >= t.range[0] && adjustedComposite <= t.range[1]
-  ) ?? TIER_DEFINITIONS[TIER_DEFINITIONS.length - 1];
-
-  return { tier: tierDef.tier, tier_label: tierDef.label };
-}
-
-// ──────────────────────────────────────────────
-// MODULE 7: INTERVENTION WINDOW CLASSIFICATION
-// Revenue architecture — every profile produces intervention type
-// ──────────────────────────────────────────────
-function generateIntervention(tier: RiskTier, domainScores: Record<Domain, number>): InterventionPlan {
-  const weakDomains = (Object.entries(domainScores) as [Domain, number][])
-    .filter(([, s]) => s < 60)
-    .map(([d]) => d);
-
-  if (tier === 'Red') {
-    return {
-      type: 'urgent',
-      title: 'Urgent Advisory Engagement',
-      description: 'Critical convergence of leadership risk signals detected. Immediate structured advisory intervention is required.',
-      self_guided: [
-        'Identify and temporarily redistribute 3–5 key decisions that currently require your direct input',
-        'Schedule immediate 1:1 candid conversations with your 2 most trusted direct reports',
-        'Audit your last 2 weeks of decisions for patterns of reactive rather than strategic behavior',
-      ],
-      facilitated: [
-        'Structured leadership debrief with an executive coach (within 1 week)',
-        'Organizational dependency audit — map where decisions are bottlenecking',
-        'Team climate assessment to identify trust erosion early',
-      ],
-      advisory_option: 'Leadership Signal Index™ Advisory Retainer — Intensive 90-day re-stabilization program with bi-weekly coaching, signal re-assessment at day 45, and structural intervention support.',
-      urgency_note: 'Without intervention, current signal trajectory suggests structural leadership breakdown within 60–90 days.',
-    };
-  }
-
-  if (tier === 'Orange') {
-    return {
-      type: 'corrective',
-      title: 'Corrective Intervention Recommended',
-      description: 'Multiple domains showing concentration signatures. Structural corrective action recommended before risk accelerates.',
-      self_guided: [
-        'Review your delegation map — identify 3 decisions you should stop owning',
-        'Block 2 hours per week for strategic reflection (non-operational)',
-        `Focus development attention on: ${weakDomains.slice(0, 2).map(formatDomainName).join(', ')}`,
-      ],
-      facilitated: [
-        '360° leadership input from direct reports and peers',
-        'Facilitated team norms session to recalibrate expectations',
-        'Leadership index re-assessment in 60 days to track trajectory',
-      ],
-      advisory_option: 'Leadership Signal Index™ Advisory Package — 60-day corrective engagement with bi-weekly advisory sessions and mid-cycle re-assessment.',
-    };
-  }
-
-  if (tier === 'Yellow') {
-    return {
-      type: 'preventative',
-      title: 'Preventative Development Plan',
-      description: 'Domain softness detected. Preventative attention recommended to avoid drift acceleration.',
-      self_guided: [
-        'Identify which of your leadership habits may be becoming dependencies',
-        `Invest deliberate development time in: ${weakDomains.slice(0, 2).map(formatDomainName).join(', ')}`,
-        'Reassess your leadership context — have org demands shifted since your last reflection?',
-      ],
-      facilitated: [
-        'Optional: structured peer leadership dialogue',
-        'Consider a 45-day check-in reassessment to validate trajectory',
-      ],
-      advisory_option: 'Leadership Signal Index™ Quarterly Monitoring — Ongoing signal tracking with annual deep-dive and trend analytics.',
-    };
-  }
-
-  // Green
-  return {
-    type: 'preventative',
-    title: 'Maintain & Sustain Plan',
-    description: 'Leadership signal integrity is high. Focus on maintaining current conditions and building longitudinal data.',
-    self_guided: [
-      'Document what is working in your leadership system — these are your buffers',
-      'Schedule a 90-day re-assessment to maintain longitudinal signal data',
-      'Consider mentoring or developing emerging leaders in your organization',
-    ],
-    facilitated: [
-      'Optional: Leadership Signal Index™ benchmark comparison at 6 months',
-    ],
-    advisory_option: 'Leadership Signal Index™ Annual Excellence Package — Annual deep-dive + benchmark comparison against portfolio/industry peers.',
-  };
-}
-
-function formatDomainName(d: Domain): string {
-  const names: Record<Domain, string> = {
-    operational: 'Operational Stability',
-    cognitive: 'Cognitive Breadth',
-    ethical: 'Ethical Integrity',
-    trust: 'Trust Climate',
-    adaptive: 'Adaptive Capacity',
-    durability: 'Leadership Durability',
-  };
-  return names[d] ?? d;
-}
-
-// ──────────────────────────────────────────────
-// RESPONSE INTEGRITY FILTERS
-// ──────────────────────────────────────────────
-export function checkResponseIntegrity(responses: Map<string, number>): {
-  passed: boolean;
-  consistency_index: number;
-  extreme_responding: boolean;
-  pattern_contradiction: boolean;
-  low_effort_flag: boolean;
-} {
-  const values = Array.from(responses.values());
-  if (values.length === 0) return {
-    passed: false,
-    consistency_index: 0,
-    extreme_responding: false,
-    pattern_contradiction: false,
-    low_effort_flag: false,
-  };
-
-  // Extreme responding: >50% of answers at extreme ends (1 or 7)
-  const extremeCount = values.filter(v => v === 1 || v === 7).length;
-  const extreme_responding = extremeCount / values.length > 0.5;
-
-  // Low effort: all same value (straight-lining)
-  const uniqueValues = new Set(values).size;
-  const low_effort_flag = uniqueValues <= 2;
-
-  // Pattern contradiction: check reverse-scored items
-  // If forward+reverse pairs are both high or both low, flag contradiction
-  let contradictions = 0;
-  const domains = ['operational', 'cognitive', 'ethical', 'trust', 'adaptive', 'durability'] as Domain[];
-  for (const domain of domains) {
-    const domainQs = QUESTIONS.filter(q => q.domain === domain);
-    const forward = domainQs.filter(q => !q.is_reverse).map(q => responses.get(q.id) ?? 4);
-    const reverse = domainQs.filter(q => q.is_reverse).map(q => responses.get(q.id) ?? 4);
-    const fwdAvg = forward.reduce((a, b) => a + b, 0) / (forward.length || 1);
-    const revAvg = reverse.reduce((a, b) => a + b, 0) / (reverse.length || 1);
-    // Both forward and reverse high = contradiction (reverse items should score opposite)
-    if (fwdAvg > 5.5 && revAvg > 5.5) contradictions++;
-    if (fwdAvg < 2.5 && revAvg < 2.5) contradictions++;
-  }
-  const pattern_contradiction = contradictions >= 2;
-
-  // Consistency index: inverse of overall variance
-  const mean = values.reduce((a, b) => a + b, 0) / values.length;
-  const variance = values.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / values.length;
-  const consistency_index = Math.max(0, Math.min(1, 1 - (Math.sqrt(variance) / 3)));
-
-  const passed = !extreme_responding && !low_effort_flag && !pattern_contradiction && consistency_index > 0.3;
-
-  return { passed, consistency_index, extreme_responding, pattern_contradiction, low_effort_flag };
-}
-
-// ──────────────────────────────────────────────
-// MAIN SCORING FUNCTION — Full Signal Engine
-// ──────────────────────────────────────────────
-export function computeSignalScores(
+// ─────────────────────────────────────────────────────────────
+// MASTER SCORING FUNCTION
+// ─────────────────────────────────────────────────────────────
+export function computeFullRiskScore(
   responses: Map<string, number>,
-  orgStage: string = 'enterprise'
-): Omit<SignalScores, 'assessment_id' | 'leader_id' | 'created_at'> {
-  const domains: Domain[] = ['operational', 'cognitive', 'ethical', 'trust', 'adaptive', 'durability'];
-
-  const rawScores: Record<Domain, number> = {} as Record<Domain, number>;
-  const calibratedScores: Record<Domain, number> = {} as Record<Domain, number>;
-  const confidenceScores: Record<Domain, number> = {} as Record<Domain, number>;
-  const bandClassifications: Record<Domain, Band> = {} as Record<Domain, Band>;
-
-  for (const domain of domains) {
-    const { raw } = computeDomainRawScore(domain, responses);
-    const { confidence } = computeCoherence(domain, responses);
-    const calibrated = applyContextualCalibration(raw, domain, orgStage);
-
-    rawScores[domain] = raw;
-    calibratedScores[domain] = calibrated;
-    confidenceScores[domain] = confidence;
-    bandClassifications[domain] = classifyBand(calibrated);
+  ceiLeaderDecisions: number = 38,
+  ceiTotalDecisions:  number = 100,
+  historicalRiskScores: number[] = []
+): RiskScoreResult {
+  // 1. Domain scores
+  const domainScores = {} as Record<SignalDomain, number>;
+  for (const domain of DOMAIN_KEYS) {
+    domainScores[domain] = computeDomainScore(domain, responses);
   }
 
-  // Composite score (weighted average with durability and trust weighted higher)
-  const compositeWeights: Record<Domain, number> = {
-    operational: 1.0,
-    cognitive:   1.0,
-    ethical:     1.2,
-    trust:       1.1,
-    adaptive:    1.0,
-    durability:  1.1,
-  };
+  // 2. LSI
+  const lsi = computeLSI(domainScores);
+  const domain_variance = computeDomainVariance(domainScores);
 
-  let weightedTotal = 0;
-  let totalWeightSum = 0;
-  for (const domain of domains) {
-    weightedTotal += calibratedScores[domain] * compositeWeights[domain];
-    totalWeightSum += compositeWeights[domain];
-  }
-  const lsi_composite = Math.round(weightedTotal / totalWeightSum);
+  // 3. LLI
+  const { lli_raw, lli_norm } = computeLLI(responses);
 
-  // Convergence detection
-  const convergenceFlags = detectConvergence(calibratedScores);
+  // 4. CEI
+  const cei = computeCEI(ceiLeaderDecisions, ceiTotalDecisions);
 
-  // Tier assignment
-  const { tier, tier_label } = assignTier(lsi_composite, convergenceFlags);
+  // 5. Cascade stage
+  const { stage: cascade_stage, level: cascade_level } = computeCascadeStage(cei);
 
-  // Intervention window generation
-  const intervention_plan = generateIntervention(tier, calibratedScores);
+  // 6. Risk score
+  const risk_score = computeRiskScore(lsi, lli_norm, cei);
+  const risk_level = classifyRiskLevel(risk_score);
 
-  // Reason codes
-  const reason_codes: string[] = [];
-  if (calibratedScores.operational < 50) reason_codes.push('CONCENTRATION_RISK: Leader-dependent execution detected');
-  if (calibratedScores.cognitive < 50) reason_codes.push('COGNITIVE_COMPRESSION: Strategic thinking bandwidth constrained');
-  if (calibratedScores.ethical < 60) reason_codes.push('INTEGRITY_PRESSURE: Value-behavior gap risk elevated');
-  if (calibratedScores.trust < 50) reason_codes.push('TRUST_EROSION: Team safety and signal fidelity declining');
-  if (calibratedScores.adaptive < 50) reason_codes.push('ADAPTATION_LAG: Change pace exceeding recalibration capacity');
-  if (calibratedScores.durability < 50) reason_codes.push('DURABILITY_DEPLETION: Sustained performance capacity at risk');
-  if (convergenceFlags.concentration_signature) reason_codes.push('MULTI_DOMAIN_CONVERGENCE: 3+ domains below threshold');
-  if (convergenceFlags.drift_acceleration) reason_codes.push('DRIFT_ACCELERATION: Imbalanced domain spread detected');
-  if (convergenceFlags.protective_buffer) reason_codes.push('BUFFER_ACTIVE: 3+ high-performing domains providing resilience');
+  // 7. Signal pattern
+  const signal_pattern = classifySignalPattern(domainScores, lsi, domain_variance, lli_norm, cei);
+
+  // 8. Trajectory
+  const trajectory_direction = computeTrajectory(risk_score, historicalRiskScores);
 
   return {
-    operational_stability: {
-      score: Math.round(calibratedScores.operational),
-      band: bandClassifications.operational,
-      confidence: Math.round(confidenceScores.operational * 100) / 100,
-      reason_codes: reason_codes.filter(r => r.includes('CONCENTRATION') || r.includes('OPERATIONAL')),
-    },
-    cognitive_breadth: {
-      score: Math.round(calibratedScores.cognitive),
-      band: bandClassifications.cognitive,
-      confidence: Math.round(confidenceScores.cognitive * 100) / 100,
-      reason_codes: reason_codes.filter(r => r.includes('COGNITIVE')),
-    },
-    ethical_integrity: {
-      score: Math.round(calibratedScores.ethical),
-      band: bandClassifications.ethical,
-      confidence: Math.round(confidenceScores.ethical * 100) / 100,
-      reason_codes: reason_codes.filter(r => r.includes('INTEGRITY')),
-    },
-    trust_climate: {
-      score: Math.round(calibratedScores.trust),
-      band: bandClassifications.trust,
-      confidence: Math.round(confidenceScores.trust * 100) / 100,
-      reason_codes: reason_codes.filter(r => r.includes('TRUST')),
-    },
-    adaptive_capacity: {
-      score: Math.round(calibratedScores.adaptive),
-      band: bandClassifications.adaptive,
-      confidence: Math.round(confidenceScores.adaptive * 100) / 100,
-      reason_codes: reason_codes.filter(r => r.includes('ADAPTATION') || r.includes('DRIFT')),
-    },
-    leadership_durability: {
-      score: Math.round(calibratedScores.durability),
-      band: bandClassifications.durability,
-      confidence: Math.round(confidenceScores.durability * 100) / 100,
-      reason_codes: reason_codes.filter(r => r.includes('DURABILITY')),
-    },
-    lsi_composite,
-    ...convergenceFlags,
-    tier,
-    tier_label,
-    intervention_type: intervention_plan.type,
-    intervention_plan,
+    ...domainScores,
+    lsi,
+    domain_variance,
+    signal_pattern,
+    lli_raw,
+    lli_norm,
+    cei,
+    cascade_stage,
+    cascade_level,
+    risk_score,
+    risk_level,
+    trajectory_direction,
   };
 }

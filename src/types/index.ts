@@ -1,105 +1,93 @@
-// Leadership Signal Index™ — Core Types
+// Leadership Risk Intelligence™ — Core Types (v3.0)
 
-export type OrgStage = 'early_vc' | 'growth_vc' | 'enterprise';
-export type RiskTier = 'Green' | 'Yellow' | 'Orange' | 'Red';
-export type InterventionType = 'preventative' | 'corrective' | 'urgent';
-export type Band = 'Exceptional' | 'Strong' | 'Adequate' | 'Developing' | 'At-Risk' | 'Critical';
-export type Domain = 'operational' | 'cognitive' | 'ethical' | 'trust' | 'adaptive' | 'durability';
+export type CascadeStage =
+  | 'Healthy Distribution'
+  | 'Emerging Exposure'
+  | 'Structural Dependency'
+  | 'Decision Bottleneck'
+  | 'Organizational Drag';
 
-export interface Organization {
-  id: number;
-  name: string;
-  type: OrgStage | 'enterprise';
-  created_at: string;
-}
+export type SignalPattern =
+  | 'Organizational Stabilizer'
+  | 'Strategic Interpreter'
+  | 'Structural Bottleneck Risk'
+  | 'Leadership Load Saturation';
 
-export interface User {
-  id: number;
-  org_id: number;
-  email: string;
-  name: string;
-  role: 'admin' | 'leader';
-  role_level: string;
-  created_at: string;
-}
+export type RiskLevel =
+  | 'Low structural risk'
+  | 'Early exposure'
+  | 'Emerging dependency'
+  | 'Structural bottleneck'
+  | 'Organizational risk';
 
-export interface ContextModule {
-  role_level: string;
-  org_stage: OrgStage;
-  team_size: number;
-  decision_volume: 'low' | 'moderate' | 'high' | 'very_high';
-  change_intensity: 'low' | 'moderate' | 'high' | 'very_high';
-  escalation_frequency: string;
-}
+export type TrajectoryDirection = 'Improving' | 'Stable' | 'Declining';
 
-export interface Assessment {
-  id: number;
-  leader_id: number;
-  org_id: number;
-  status: 'in_progress' | 'completed' | 'flagged';
-  context: ContextModule;
-  integrity_passed: boolean;
-  consistency_index: number;
-  started_at: string;
-  completed_at?: string;
-}
+export type SignalDomain =
+  | 'stress_regulation'
+  | 'cognitive_breadth'
+  | 'trust_climate'
+  | 'ethical_integrity'
+  | 'leadership_durability'
+  | 'adaptive_capacity';
 
-export interface AssessmentQuestion {
-  id: string;
-  domain: Domain;
-  text: string;
-  weight: number;
-  is_anchor: boolean;
-  is_reverse: boolean;
-  time_horizon?: string; // e.g., "last 30-45 days"
-}
-
-export interface IndexScore {
-  score: number;           // 0-100
-  band: Band;
-  confidence: number;      // 0-1
-  reason_codes: string[];
-}
-
-export interface SignalScores {
-  assessment_id: number;
-  leader_id: number;
-  operational_stability: IndexScore;
-  cognitive_breadth: IndexScore;
-  ethical_integrity: IndexScore;
-  trust_climate: IndexScore;
-  adaptive_capacity: IndexScore;
-  leadership_durability: IndexScore;
-  lsi_composite: number;
-  convergence_flag: boolean;
-  concentration_signature: boolean;
-  drift_acceleration: boolean;
-  protective_buffer: boolean;
-  risk_tier: RiskTier;
-  tier_label: string;
-  intervention_type: InterventionType;
-  intervention_plan: InterventionPlan;
-  created_at: string;
-}
-
-export interface InterventionPlan {
-  type: InterventionType;
-  title: string;
-  description: string;
-  self_guided: string[];
-  facilitated: string[];
-  advisory_option: string;
-  urgency_note?: string;
-}
-
-export interface TierDefinition {
-  tier: RiskTier;
+export interface DomainMeta {
+  key: SignalDomain;
   label: string;
-  range: [number, number];
+  shortLabel: string;
   color: string;
   description: string;
-  bg: string;
+  questions: string[]; // Q IDs
+}
+
+export interface Question {
+  id: string;
+  domain: SignalDomain | 'load' | 'orientation';
   text: string;
+  scored: boolean;
+  reverse?: boolean;
+}
+
+export interface RiskScoreResult {
+  // Domain scores (1.0–5.0)
+  stress_regulation: number;
+  cognitive_breadth: number;
+  trust_climate: number;
+  ethical_integrity: number;
+  leadership_durability: number;
+  adaptive_capacity: number;
+  // LSI
+  lsi: number;
+  domain_variance: number;
+  signal_pattern: SignalPattern;
+  // Load
+  lli_raw: number;
+  lli_norm: number;
+  // Exposure
+  cei: number;
+  cascade_stage: CascadeStage;
+  cascade_level: number;
+  // Risk
+  risk_score: number;
+  risk_level: RiskLevel;
+  trajectory_direction: TrajectoryDirection;
+}
+
+export interface LeaderRow {
+  leader_id: number;
+  organization_id: number;
+  name: string;
+  email: string;
+  title: string;
+  role_level: string;
+  system_role: string;
+  created_at: string;
+}
+
+export interface OrgRow {
+  organization_id: number;
+  name: string;
+  industry: string;
+  employee_count: number;
 }
 
 export type Bindings = {
@@ -107,8 +95,8 @@ export type Bindings = {
 };
 
 export type Variables = {
-  userId: number;
+  leaderId: number;
   orgId: number;
-  userRole: string;
-  userName: string;
+  leaderRole: string;
+  leaderName: string;
 };

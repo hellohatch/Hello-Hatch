@@ -1,280 +1,358 @@
-// Dashboard Routes — Leader Executive View
+// Leader Dashboard — Personal Intelligence View
 
 import { Hono } from 'hono';
 import type { Bindings, Variables } from '../types/index.js';
 import { requireAuth } from '../lib/auth.js';
+import { RISK_LEVELS, CASCADE_STAGES, SIGNAL_PATTERN_META } from '../lib/scoring.js';
+import { DOMAIN_META, DOMAIN_KEYS } from '../lib/questions.js';
 
 const dashboard = new Hono<{ Bindings: Bindings; Variables: Variables }>();
-
 dashboard.use('*', requireAuth);
 
-// ── GET /dashboard ──
 dashboard.get('/', async (c) => {
-  const db = c.env.DB;
-  const userId = c.get('userId');
-  const userName = c.get('userName');
-  const orgId = c.get('orgId');
+  const leaderId   = c.get('leaderId');
+  const leaderName = c.get('leaderName');
+  const orgId      = c.get('orgId');
 
-  // Get all completed assessments for this leader
-  const assessments = await db.prepare(`
-    SELECT a.id, a.status, a.started_at, a.completed_at, a.org_stage,
-           s.lsi_composite, s.risk_tier, s.tier_label, s.intervention_type,
-           s.operational_stability, s.cognitive_breadth, s.ethical_integrity,
-           s.trust_climate, s.adaptive_capacity, s.leadership_durability,
-           s.operational_band, s.cognitive_band, s.ethical_band,
-           s.trust_band, s.adaptive_band, s.durability_band
+  // Latest completed assessment
+  const latest = await c.env.DB.prepare(`
+    SELECT a.assessment_id, a.completed_at, rs.*
     FROM assessments a
-    LEFT JOIN signal_scores s ON s.assessment_id = a.id
-    WHERE a.leader_id = ?
-    ORDER BY a.started_at DESC
-    LIMIT 20
-  `).bind(userId).all<Record<string, unknown>>();
+    JOIN risk_scores rs ON rs.assessment_id = a.assessment_id
+    WHERE a.leader_id = ? AND a.status = 'completed'
+    ORDER BY a.completed_at DESC LIMIT 1
+  `).bind(leaderId).first<Record<string, unknown>>();
 
-  const completed = (assessments.results ?? []).filter(a => a.status === 'completed' || a.status === 'flagged');
-  const inProgress = (assessments.results ?? []).filter(a => a.status === 'in_progress');
-  const latest = completed[0] ?? null;
+  // Assessment history (last 8)
+  const history = await c.env.DB.prepare(`
+    SELECT a.assessment_id, a.completed_at,
+           rs.lsi, rs.lli_norm, rs.cei, rs.risk_score, rs.risk_level,
+           rs.cascade_stage, rs.cascade_level, rs.signal_pattern, rs.trajectory_direction
+    FROM assessments a
+    JOIN risk_scores rs ON rs.assessment_id = a.assessment_id
+    WHERE a.leader_id = ? AND a.status = 'completed'
+    ORDER BY a.completed_at DESC LIMIT 8
+  `).bind(leaderId).all<Record<string, unknown>>();
 
-  return c.html(dashboardPage(userName, completed, inProgress, latest));
+  // In-progress assessment
+  const inProg = await c.env.DB.prepare(
+    'SELECT assessment_id FROM assessments WHERE leader_id=? AND status=? LIMIT 1'
+  ).bind(leaderId, 'in_progress').first<{ assessment_id: number }>();
+
+  return c.html(dashboardPage(leaderName, latest, history.results ?? [], inProg?.assessment_id ?? null));
 });
 
-// ──────────────────────────────────────────────
-// PAGE TEMPLATE
-// ──────────────────────────────────────────────
-
+// ─────────────────────────────────────────────
 function dashboardPage(
-  userName: string,
-  completed: Record<string, unknown>[],
-  inProgress: Record<string, unknown>[],
-  latest: Record<string, unknown> | null
+  name: string,
+  latest: Record<string, unknown> | null,
+  history: Record<string, unknown>[],
+  inProgressId: number | null
 ): string {
-  const tierColors: Record<string, string> = {
-    Green: '#10B981', Yellow: '#F59E0B', Orange: '#F97316', Red: '#EF4444'
+
+  const riskColors: Record<string, string> = {
+    'Low structural risk': '#10B981',
+    'Early exposure': '#84CC16',
+    'Emerging dependency': '#F59E0B',
+    'Structural bottleneck': '#F97316',
+    'Organizational risk': '#EF4444',
   };
-  const tierBadge: Record<string, string> = {
-    Green: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
-    Yellow: 'bg-amber-100 text-amber-800 border border-amber-200',
-    Orange: 'bg-orange-100 text-orange-800 border border-orange-200',
-    Red: 'bg-red-100 text-red-800 border border-red-200',
+  const cascadeColors: Record<string, string> = {
+    'Healthy Distribution': '#10B981',
+    'Emerging Exposure': '#84CC16',
+    'Structural Dependency': '#F59E0B',
+    'Decision Bottleneck': '#F97316',
+    'Organizational Drag': '#EF4444',
   };
 
-  const domainKeys = [
-    { key: 'operational_stability', label: 'Operational', bandKey: 'operational_band' },
-    { key: 'cognitive_breadth', label: 'Cognitive', bandKey: 'cognitive_band' },
-    { key: 'ethical_integrity', label: 'Ethical', bandKey: 'ethical_band' },
-    { key: 'trust_climate', label: 'Trust', bandKey: 'trust_band' },
-    { key: 'adaptive_capacity', label: 'Adaptive', bandKey: 'adaptive_band' },
-    { key: 'leadership_durability', label: 'Durability', bandKey: 'durability_band' },
-  ];
-
-  const latestScoreCards = latest ? domainKeys.map(d => {
-    const score = latest[d.key] as number ?? 0;
-    const band = latest[d.bandKey] as string ?? '';
-    const color = latest.risk_tier ? tierColors[latest.risk_tier as string] : '#6B7280';
+  const historyRows = history.map((h, i) => {
+    const rColor = riskColors[h.risk_level as string] ?? '#6B7280';
+    const cColor = cascadeColors[h.cascade_stage as string] ?? '#6B7280';
+    const date = new Date(h.completed_at as string).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     return `
-    <div class="bg-white border border-slate-200 rounded-xl p-4">
-      <p class="text-xs text-slate-500 mb-1">${d.label}</p>
-      <p class="text-2xl font-bold text-slate-900">${score}</p>
-      <div class="mt-2 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-        <div class="h-full rounded-full" style="width:${score}%;background:${color}"></div>
-      </div>
-      <p class="text-xs text-slate-400 mt-1">${band}</p>
-    </div>`;
-  }).join('') : '';
-
-  const historyRows = completed.slice(0, 8).map((a, i) => {
-    const tier = a.risk_tier as string;
-    const date = new Date(a.completed_at as string ?? a.started_at as string)
-      .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    const badge = tierBadge[tier] ?? 'bg-slate-100 text-slate-700';
-    const isCurrent = i === 0;
-    return `
-    <tr class="${isCurrent ? 'bg-blue-50/50' : 'hover:bg-slate-50'} transition-colors">
-      <td class="px-4 py-3 text-sm text-slate-600">${date}${isCurrent ? ' <span class="text-xs text-blue-600 font-medium">(Latest)</span>' : ''}</td>
+    <tr class="${i === 0 ? 'bg-indigo-50/40' : 'hover:bg-slate-50'} transition-colors">
+      <td class="px-4 py-3 text-sm text-slate-600">${date}${i === 0 ? ' <span class="text-xs text-indigo-600 font-medium ml-1">Latest</span>' : ''}</td>
       <td class="px-4 py-3">
-        <span class="text-sm font-bold text-slate-900">${a.lsi_composite ?? '—'}</span>
-        <span class="text-xs text-slate-400">/100</span>
+        <span class="text-sm font-bold" style="color:${rColor}">${(h.risk_score as number).toFixed(3)}</span>
       </td>
       <td class="px-4 py-3">
-        <span class="text-xs font-semibold px-2 py-1 rounded-full ${badge}">${tier} — ${a.tier_label ?? ''}</span>
+        <span class="text-xs font-semibold" style="color:${rColor}">${h.risk_level}</span>
       </td>
-      <td class="px-4 py-3 text-xs text-slate-500 capitalize">${a.intervention_type ?? '—'}</td>
+      <td class="px-4 py-3 text-xs font-medium" style="color:${cColor}">${h.cascade_stage}</td>
+      <td class="px-4 py-3 text-xs text-slate-500">${(h.lsi as number).toFixed(2)} LSI · ${(h.lli_norm as number).toFixed(2)} LLI · ${((h.cei as number) * 100).toFixed(0)}% CEI</td>
       <td class="px-4 py-3">
-        <a href="/assessment/${a.id}/results" class="text-xs text-blue-600 hover:underline">View brief</a>
+        <a href="/assessment/${h.assessment_id}/brief" class="text-xs text-indigo-600 hover:underline font-medium">View Brief</a>
       </td>
     </tr>`;
   }).join('');
 
-  // Build chart data for trend line
-  const chartData = completed.slice(0, 10).reverse().map(a => ({
-    date: new Date(a.completed_at as string ?? a.started_at as string).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    composite: a.lsi_composite ?? 0,
-  }));
+  const chartLabels = [...history].reverse().map(h =>
+    new Date(h.completed_at as string).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  );
+  const chartRisk = [...history].reverse().map(h => (h.risk_score as number).toFixed(4));
+  const chartLSI  = [...history].reverse().map(h => (h.lsi as number).toFixed(3));
+
+  const latestRiskColor = latest ? (riskColors[latest.risk_level as string] ?? '#6B7280') : '#6B7280';
+  const patternMeta = latest ? SIGNAL_PATTERN_META[latest.signal_pattern as keyof typeof SIGNAL_PATTERN_META] : null;
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dashboard — LSI™</title>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>My Dashboard — LRI™</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="bg-slate-50">
-  <!-- Nav -->
-  <nav class="bg-white border-b border-slate-200 sticky top-0 z-10">
-    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-          <i class="fas fa-chart-line text-white text-sm"></i>
-        </div>
-        <span class="font-bold text-slate-900 text-sm">Leadership Signal Index™</span>
+
+<nav class="bg-white border-b border-slate-200 sticky top-0 z-10">
+  <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+        <i class="fas fa-chart-line text-white text-sm"></i>
       </div>
-      <div class="flex items-center gap-4">
-        <span class="text-sm text-slate-600">
-          <i class="fas fa-user-circle mr-1"></i>
-          ${userName}
-        </span>
-        <a href="/admin" class="text-xs text-slate-400 hover:text-slate-600">Admin</a>
-        <a href="/logout" class="text-xs text-slate-500 hover:text-red-600">
-          <i class="fas fa-sign-out-alt mr-1"></i>Logout
-        </a>
-      </div>
+      <span class="font-bold text-slate-900 text-sm tracking-tight">Leadership Risk Intelligence™</span>
     </div>
-  </nav>
-
-  <div class="max-w-6xl mx-auto px-4 py-8 space-y-6">
-
-    <!-- Header -->
-    <div class="flex items-start justify-between">
-      <div>
-        <h1 class="text-2xl font-bold text-slate-900">Your Signal Dashboard</h1>
-        <p class="text-slate-500 text-sm mt-1">Leadership Risk Intelligence — Personal View</p>
-      </div>
-      <div class="flex gap-3">
-        ${inProgress.length > 0 ? `
-        <a href="/assessment/${inProgress[0].id}/questions"
-           class="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors">
-          <i class="fas fa-play-circle"></i> Continue Assessment
-        </a>` : `
-        <a href="/assessment/new"
-           class="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors">
-          <i class="fas fa-plus"></i> New Assessment
-        </a>`}
-      </div>
-    </div>
-
-    ${!latest ? `
-    <!-- Empty State -->
-    <div class="bg-white border-2 border-dashed border-slate-200 rounded-2xl p-12 text-center">
-      <div class="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-        <i class="fas fa-chart-radar text-blue-400 text-2xl"></i>
-      </div>
-      <h3 class="text-lg font-semibold text-slate-800 mb-2">No assessments yet</h3>
-      <p class="text-slate-500 text-sm mb-6 max-w-sm mx-auto">Take your first Leadership Signal Assessment to generate your risk profile and intervention recommendations.</p>
-      <a href="/assessment/new" class="inline-flex items-center gap-2 bg-blue-600 text-white font-semibold px-6 py-3 rounded-xl text-sm hover:bg-blue-700 transition-colors">
-        <i class="fas fa-play-circle"></i> Start First Assessment
+    <div class="flex items-center gap-4">
+      <span class="text-sm text-slate-600 hidden sm:block">
+        <i class="fas fa-user-circle mr-1 text-slate-400"></i>${name}
+      </span>
+      <a href="/org" class="text-xs text-slate-400 hover:text-slate-700 transition-colors">Org View</a>
+      <a href="/logout" class="text-xs text-slate-400 hover:text-red-600 transition-colors">
+        <i class="fas fa-sign-out-alt mr-1"></i>Logout
       </a>
-    </div>` : `
-
-    <!-- Latest Score Overview -->
-    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-      <div class="flex items-start justify-between mb-5">
-        <div>
-          <h2 class="text-base font-bold text-slate-800">Latest Signal Profile</h2>
-          <p class="text-xs text-slate-400 mt-0.5">
-            ${new Date(latest.completed_at as string ?? latest.started_at as string).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-          </p>
-        </div>
-        <div class="flex items-center gap-4">
-          <div class="text-right">
-            <p class="text-3xl font-bold" style="color:${tierColors[latest.risk_tier as string] ?? '#6B7280'}">${latest.lsi_composite ?? '—'}</p>
-            <p class="text-xs text-slate-400">Composite Score</p>
-          </div>
-          <div>
-            <span class="text-sm font-semibold px-3 py-1.5 rounded-full ${tierBadge[latest.risk_tier as string] ?? 'bg-slate-100 text-slate-700'}">
-              ${latest.risk_tier} — ${latest.tier_label}
-            </span>
-            <p class="text-xs text-slate-400 mt-1 text-center capitalize">${latest.intervention_type} intervention</p>
-          </div>
-        </div>
-      </div>
-      <div class="grid grid-cols-3 md:grid-cols-6 gap-3">
-        ${latestScoreCards}
-      </div>
-      <div class="mt-4 flex justify-end">
-        <a href="/assessment/${latest.id}/results" class="text-sm text-blue-600 hover:text-blue-800 font-medium">
-          View full executive brief <i class="fas fa-arrow-right ml-1"></i>
-        </a>
-      </div>
     </div>
+  </div>
+</nav>
 
-    <!-- Trend Chart -->
-    ${chartData.length > 1 ? `
-    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-      <h2 class="text-base font-bold text-slate-800 mb-4">LSI™ Composite Trend</h2>
-      <canvas id="trendChart" height="80"></canvas>
-    </div>` : ''}
+<div class="max-w-6xl mx-auto px-4 py-7 space-y-5">
 
-    <!-- Assessment History -->
-    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-        <h2 class="text-base font-bold text-slate-800">Assessment History</h2>
-        <span class="text-xs text-slate-400">${completed.length} completed</span>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="w-full">
-          <thead>
-            <tr class="border-b border-slate-100">
-              <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Date</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Score</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Risk Tier</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Intervention</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Actions</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100">
-            ${historyRows || '<tr><td colspan="5" class="px-4 py-8 text-center text-sm text-slate-400">No completed assessments</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    </div>`}
-
+  <!-- Header -->
+  <div class="flex items-center justify-between flex-wrap gap-3">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-900">Intelligence Dashboard</h1>
+      <p class="text-sm text-slate-500 mt-0.5">Leadership Risk Intelligence™ · Personal View</p>
+    </div>
+    <div class="flex gap-2">
+      ${inProgressId ? `
+      <a href="/assessment/${inProgressId}/take"
+        class="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors">
+        <i class="fas fa-play"></i> Continue Assessment
+      </a>` : `
+      <a href="/assessment/new"
+        class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors">
+        <i class="fas fa-plus"></i> New Assessment
+      </a>`}
+    </div>
   </div>
 
-  ${chartData.length > 1 ? `
-  <script>
-    const ctx = document.getElementById('trendChart')?.getContext('2d');
-    if (ctx) {
-      new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: ${JSON.stringify(chartData.map(d => d.date))},
-          datasets: [{
-            label: 'LSI™ Composite',
-            data: ${JSON.stringify(chartData.map(d => d.composite))},
-            borderColor: '#3B82F6',
-            backgroundColor: '#3B82F620',
-            borderWidth: 2.5,
-            pointBackgroundColor: '#3B82F6',
-            pointRadius: 5,
-            fill: true,
-            tension: 0.3
-          }]
-        },
-        options: {
-          responsive: true,
-          plugins: { legend: { display: false } },
-          scales: {
-            y: { min: 0, max: 100, grid: { color: '#F1F5F9' } },
-            x: { grid: { display: false } }
-          }
-        }
-      });
+  ${!latest ? `
+  <!-- Empty State -->
+  <div class="bg-white border-2 border-dashed border-slate-200 rounded-2xl p-14 text-center">
+    <div class="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+      <i class="fas fa-chart-radar text-indigo-400 text-2xl"></i>
+    </div>
+    <h3 class="text-lg font-semibold text-slate-800 mb-2">No assessments yet</h3>
+    <p class="text-slate-500 text-sm mb-6 max-w-sm mx-auto">Complete your first Leadership Risk Intelligence™ assessment to generate your executive brief and risk profile.</p>
+    <a href="/assessment/new" class="inline-flex items-center gap-2 bg-indigo-600 text-white font-semibold px-6 py-3 rounded-xl text-sm hover:bg-indigo-700 transition-colors">
+      <i class="fas fa-play-circle"></i> Begin Assessment
+    </a>
+  </div>` : `
+
+  <!-- THE INVESTOR VISUAL: Signal → Load → Concentration → Risk -->
+  <div class="bg-slate-900 rounded-2xl p-5">
+    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Leadership Risk Intelligence™ Engine</p>
+    <div class="grid grid-cols-4 gap-2">
+      ${[
+        { label: 'Leadership Signals', value: (latest.lsi as number).toFixed(2), sub: `LSI™ · /5.0`, color: '#6366F1', icon: 'signal' },
+        { label: 'Leadership Load', value: (latest.lli_norm as number).toFixed(2), sub: `LLI™ norm · /1.0`, color: '#F59E0B', icon: 'weight-hanging' },
+        { label: 'Decision Concentration', value: ((latest.cei as number) * 100).toFixed(0) + '%', sub: `CEI™ · of decisions`, color: '#F97316', icon: 'compress-arrows-alt' },
+        { label: 'Structural Risk', value: (latest.risk_score as number).toFixed(3), sub: latest.risk_level as string, color: latestRiskColor, icon: 'exclamation-triangle' },
+      ].map((item, i) => `
+      <div class="bg-white/5 border border-white/8 rounded-xl p-4 relative text-center">
+        <i class="fas fa-${item.icon} text-lg mb-2" style="color:${item.color}"></i>
+        <p class="text-xs text-slate-400 mb-1">${item.label}</p>
+        <p class="text-2xl font-black" style="color:${item.color}">${item.value}</p>
+        <p class="text-xs text-slate-500 mt-0.5 leading-tight">${item.sub}</p>
+        ${i < 3 ? '<div class="absolute -bottom-3 left-1/2 -translate-x-1/2 text-slate-600 text-xs">↓</div>' : ''}
+      </div>`).join('')}
+    </div>
+  </div>
+
+  <!-- Signal Radar + Cascade + Pattern -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+    <!-- Radar -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+      <p class="text-sm font-bold text-slate-800 mb-3">Signal Radar</p>
+      <canvas id="radarChart" height="230"></canvas>
+    </div>
+
+    <!-- Cost Cascade -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+      <p class="text-sm font-bold text-slate-800 mb-1">Leadership Cost Cascade™</p>
+      <p class="text-xs text-slate-400 mb-4">CEI = ${(latest.cei as number).toFixed(2)}</p>
+      <div class="space-y-1.5">
+        ${CASCADE_STAGES.map(s => {
+          const isActive = s.stage === (latest.cascade_stage as string);
+          return `
+          <div class="flex items-center gap-2 px-3 py-2 rounded-lg transition-all ${isActive ? 'border' : ''}"
+            style="${isActive ? `background:${s.bg};border-color:${s.color}44` : 'background:#F8FAFC'}">
+            <div class="w-2 h-2 rounded-full flex-shrink-0" style="background:${isActive ? s.color : '#CBD5E1'}"></div>
+            <span class="text-xs ${isActive ? 'font-bold' : 'font-medium text-slate-400'}"
+              style="${isActive ? `color:${s.color}` : ''}">${s.stage}</span>
+            ${isActive ? '<i class="fas fa-map-marker-alt text-xs ml-auto" style="color:' + s.color + '"></i>' : ''}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <!-- Pattern + Trajectory -->
+    <div class="space-y-4">
+      ${patternMeta ? `
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Signal Pattern</p>
+        <div class="flex items-center gap-2 mb-2">
+          <i class="fas fa-${patternMeta.icon} text-sm" style="color:${patternMeta.color}"></i>
+          <span class="text-sm font-bold text-slate-900">${latest.signal_pattern}</span>
+        </div>
+        <p class="text-xs text-slate-600">${patternMeta.description}</p>
+      </div>` : ''}
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Risk Score Breakdown</p>
+        <div class="space-y-2 text-sm">
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-500">LSI™ (signals)</span>
+            <span class="font-semibold text-indigo-600">${(latest.lsi as number).toFixed(3)}</span>
+          </div>
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-500">LLI_norm (load)</span>
+            <span class="font-semibold text-amber-600">${(latest.lli_norm as number).toFixed(3)}</span>
+          </div>
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-500">CEI (concentration)</span>
+            <span class="font-semibold text-orange-600">${(latest.cei as number).toFixed(3)}</span>
+          </div>
+          <div class="border-t border-slate-100 pt-2 flex justify-between text-xs">
+            <span class="text-slate-600 font-medium">Formula: (CEI × LLI_norm) / LSI</span>
+            <span class="font-black" style="color:${latestRiskColor}">${(latest.risk_score as number).toFixed(4)}</span>
+          </div>
+        </div>
+      </div>
+      <a href="/assessment/${latest.assessment_id}/brief"
+        class="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-3 rounded-xl text-sm transition-colors w-full">
+        <i class="fas fa-file-alt"></i> View Full Executive Brief
+      </a>
+    </div>
+  </div>
+
+  <!-- Trend Charts -->
+  ${history.length > 1 ? `
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+      <p class="text-sm font-bold text-slate-800 mb-3">Risk Score™ Trajectory</p>
+      <canvas id="riskTrend" height="100"></canvas>
+    </div>
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+      <p class="text-sm font-bold text-slate-800 mb-3">LSI™ Trajectory</p>
+      <canvas id="lsiTrend" height="100"></canvas>
+    </div>
+  </div>` : ''}
+
+  <!-- History Table -->
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+      <h2 class="text-sm font-bold text-slate-800">Assessment History</h2>
+      <span class="text-xs text-slate-400">${history.length} completed</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead>
+          <tr class="border-b border-slate-100 bg-slate-50">
+            <th class="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Date</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Risk Score™</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Risk Level</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Cascade Stage</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Metrics</th>
+            <th class="px-4 py-3"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          ${historyRows || `<tr><td colspan="6" class="px-4 py-10 text-center text-sm text-slate-400">Complete an assessment to see your history.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  `}
+</div>
+
+<script>
+${latest ? `
+// Radar Chart
+const rCtx = document.getElementById('radarChart')?.getContext('2d');
+if (rCtx) {
+  new Chart(rCtx, {
+    type: 'radar',
+    data: {
+      labels: ['Stress\\nReg.','Cognitive\\nBreadth','Trust\\nClimate','Ethical\\nIntegrity','Leadership\\nDurability','Adaptive\\nCapacity'],
+      datasets: [{
+        label: 'Signal Profile',
+        data: [${DOMAIN_KEYS.map(k => (latest[k] as number ?? 0).toFixed(2)).join(',')}],
+        backgroundColor: 'rgba(99,102,241,0.12)',
+        borderColor: '#6366F1',
+        borderWidth: 2,
+        pointBackgroundColor: '#6366F1',
+        pointRadius: 4,
+      }]
+    },
+    options: {
+      responsive: true,
+      scales: { r: { min:0, max:5, ticks:{ stepSize:1, font:{size:8} }, grid:{color:'#E2E8F0'}, pointLabels:{font:{size:8}} } },
+      plugins: { legend: { display: false } }
     }
-  </script>` : ''}
-</body>
-</html>`;
+  });
+}
+
+${history.length > 1 ? `
+// Risk trend
+const rt = document.getElementById('riskTrend')?.getContext('2d');
+if (rt) {
+  new Chart(rt, {
+    type: 'line',
+    data: {
+      labels: ${JSON.stringify(chartLabels)},
+      datasets: [{
+        data: [${chartRisk.join(',')}],
+        borderColor: '#EF4444', backgroundColor: '#EF444420',
+        borderWidth: 2, pointRadius: 4, fill: true, tension: 0.3
+      }]
+    },
+    options: { responsive: true, plugins:{legend:{display:false}},
+      scales: { y: { min:0, grid:{color:'#F1F5F9'} }, x:{grid:{display:false}} } }
+  });
+}
+// LSI trend
+const lt = document.getElementById('lsiTrend')?.getContext('2d');
+if (lt) {
+  new Chart(lt, {
+    type: 'line',
+    data: {
+      labels: ${JSON.stringify(chartLabels)},
+      datasets: [{
+        data: [${chartLSI.join(',')}],
+        borderColor: '#6366F1', backgroundColor: '#6366F120',
+        borderWidth: 2, pointRadius: 4, fill: true, tension: 0.3
+      }]
+    },
+    options: { responsive: true, plugins:{legend:{display:false}},
+      scales: { y: { min:0, max:5, grid:{color:'#F1F5F9'} }, x:{grid:{display:false}} } }
+  });
+}` : ''}
+` : ''}
+</script>
+</body></html>`;
 }
 
 export default dashboard;
