@@ -1,4 +1,4 @@
-// Leadership Risk Intelligence™ — Core Types (v3.0)
+// Leadership Risk Intelligence™ — Core Types (v3.1)
 
 export type CascadeStage =
   | 'Healthy Distribution'
@@ -36,7 +36,7 @@ export interface DomainMeta {
   shortLabel: string;
   color: string;
   description: string;
-  questions: string[]; // Q IDs
+  questions: string[];
 }
 
 export interface Question {
@@ -57,6 +57,7 @@ export interface RiskScoreResult {
   adaptive_capacity: number;
   // LSI
   lsi: number;
+  lsi_norm: number;        // NEW v3.1: LSI / 5 → range 0.0–1.0
   domain_variance: number;
   signal_pattern: SignalPattern;
   // Load
@@ -66,7 +67,7 @@ export interface RiskScoreResult {
   cei: number;
   cascade_stage: CascadeStage;
   cascade_level: number;
-  // Risk
+  // Risk  (v3.1: uses LSI_norm denominator)
   risk_score: number;
   risk_level: RiskLevel;
   trajectory_direction: TrajectoryDirection;

@@ -118,14 +118,16 @@ api.post('/risk/calculate', async (c) => {
     risk_score,
     risk_level,
     trajectory_direction: trajectory,
-    formula: '(CEI × LLI_norm) / LSI',
+    formula: '(CEI × LLI_norm) / LSI_norm  [v3.1 — all variables 0–1 range]',
+    lsi_norm: parseFloat((lsi / 5).toFixed(4)),
     cascade_description: stageMeta.description,
+    cascade_basis: 'Risk Score (v3.1 — not CEI alone)',
     risk_bands: [
-      { range: '0.000–0.050', level: 'Low structural risk' },
-      { range: '0.051–0.100', level: 'Early exposure' },
-      { range: '0.101–0.200', level: 'Emerging dependency' },
-      { range: '0.201–0.350', level: 'Structural bottleneck' },
-      { range: '>0.350',      level: 'Organizational risk' },
+      { range: '0.000–0.030', level: 'Low structural risk',   cascade: 'Healthy Distribution' },
+      { range: '0.031–0.080', level: 'Early exposure',        cascade: 'Emerging Exposure' },
+      { range: '0.081–0.150', level: 'Emerging dependency',  cascade: 'Structural Dependency' },
+      { range: '0.151–0.300', level: 'Structural bottleneck', cascade: 'Decision Bottleneck' },
+      { range: '>0.300',      level: 'Organizational risk',  cascade: 'Organizational Drag' },
     ],
   });
 });
@@ -208,10 +210,12 @@ api.get('/leader/:id/brief', requireAuth, async (c) => {
       date: h.created_at,
     })),
     formulas: {
-      lsi:        'LSI = (SR + CB + TC + EI + LD + AC) / 6',
-      lli_norm:   'LLI_norm = (LLI_raw - 1) / 4',
-      cei:        'CEI = leader_decisions / total_decisions',
-      risk_score: 'Risk Score = (CEI × LLI_norm) / LSI',
+      lsi:        'LSI = (SR + CB + TC + EI + LD + AC) / 6  → range 1.0–5.0',
+      lsi_norm:   'LSI_norm = LSI / 5  → range 0.0–1.0',
+      lli_norm:   'LLI_norm = (LLI_raw - 1) / 4  → range 0.0–1.0',
+      cei:        'CEI = leader_decisions / total_decisions  → range 0.0–1.0',
+      risk_score: 'Risk Score = (CEI × LLI_norm) / LSI_norm  [v3.1 — all inputs 0–1]',
+      cascade:    'Cascade Stage = classified by Risk Score (not CEI alone)',
     },
   });
 });

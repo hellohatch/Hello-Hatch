@@ -39,7 +39,26 @@ dashboard.get('/', async (c) => {
     'SELECT assessment_id FROM assessments WHERE leader_id=? AND status=? LIMIT 1'
   ).bind(leaderId, 'in_progress').first<{ assessment_id: number }>();
 
-  return c.html(dashboardPage(leaderName, latest, history.results ?? [], inProg?.assessment_id ?? null));
+  // Decision velocity — decisions resolved by this leader in last 30 days
+  const decisionData = await c.env.DB.prepare(`
+    SELECT
+      COUNT(*) as decisions_30d,
+      COUNT(DISTINCT date(timestamp)) as active_days,
+      (SELECT COUNT(*) FROM decision_events WHERE organization_id=? AND timestamp >= datetime('now','-30 days')) as org_total_30d
+    FROM decision_events
+    WHERE resolved_by=? AND timestamp >= datetime('now','-30 days')
+  `).bind(orgId, leaderId).first<{ decisions_30d: number; active_days: number; org_total_30d: number }>();
+
+  const decisions30d  = decisionData?.decisions_30d  ?? 0;
+  const orgTotal30d   = decisionData?.org_total_30d  ?? 0;
+  const activeDays    = decisionData?.active_days    ?? 30;
+  const velocity      = activeDays > 0 ? parseFloat((decisions30d / 30).toFixed(2)) : 0;
+  const ceiLive       = orgTotal30d > 0 ? parseFloat((decisions30d / orgTotal30d).toFixed(3)) : null;
+
+  return c.html(dashboardPage(
+    leaderName, latest, history.results ?? [], inProg?.assessment_id ?? null,
+    decisions30d, orgTotal30d, velocity, ceiLive
+  ));
 });
 
 // ─────────────────────────────────────────────
@@ -47,7 +66,11 @@ function dashboardPage(
   name: string,
   latest: Record<string, unknown> | null,
   history: Record<string, unknown>[],
-  inProgressId: number | null
+  inProgressId: number | null,
+  decisions30d: number = 0,
+  orgTotal30d: number = 0,
+  velocity: number = 0,
+  ceiLive: number | null = null
 ): string {
 
   const riskColors: Record<string, string> = {
@@ -162,22 +185,27 @@ function dashboardPage(
 
   <!-- THE INVESTOR VISUAL: Signal → Load → Concentration → Risk -->
   <div class="bg-slate-900 rounded-2xl p-5">
-    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Leadership Risk Intelligence™ Engine</p>
-    <div class="grid grid-cols-4 gap-2">
+    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Leadership Risk Intelligence™ Engine · v3.1 · Risk = (CEI × LLI_norm) / LSI_norm</p>
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-2">
       ${[
-        { label: 'Leadership Signals', value: (latest.lsi as number).toFixed(2), sub: `LSI™ · /5.0`, color: '#6366F1', icon: 'signal' },
-        { label: 'Leadership Load', value: (latest.lli_norm as number).toFixed(2), sub: `LLI™ norm · /1.0`, color: '#F59E0B', icon: 'weight-hanging' },
-        { label: 'Decision Concentration', value: ((latest.cei as number) * 100).toFixed(0) + '%', sub: `CEI™ · of decisions`, color: '#F97316', icon: 'compress-arrows-alt' },
+        { label: 'LSI™ (raw)', value: (latest.lsi as number).toFixed(2), sub: `/ 5.0 · LSI_norm = ${((latest.lsi_norm as number) ?? ((latest.lsi as number)/5)).toFixed(3)}`, color: '#6366F1', icon: 'signal' },
+        { label: 'Leadership Load', value: (latest.lli_norm as number).toFixed(3), sub: `LLI_norm · / 1.0`, color: '#F59E0B', icon: 'weight-hanging' },
+        { label: 'Decision Concentration', value: ((latest.cei as number) * 100).toFixed(0) + '%', sub: `CEI™ · of total decisions`, color: '#F97316', icon: 'compress-arrows-alt' },
+        { label: 'Decision Velocity', value: velocity > 0 ? velocity.toFixed(1) + '/d' : decisions30d + '/mo', sub: decisions30d + ' decisions · 30 days', color: '#8B5CF6', icon: 'bolt' },
         { label: 'Structural Risk', value: (latest.risk_score as number).toFixed(3), sub: latest.risk_level as string, color: latestRiskColor, icon: 'exclamation-triangle' },
       ].map((item, i) => `
-      <div class="bg-white/5 border border-white/8 rounded-xl p-4 relative text-center">
+      <div class="bg-white/5 border border-white/8 rounded-xl p-4 text-center">
         <i class="fas fa-${item.icon} text-lg mb-2" style="color:${item.color}"></i>
         <p class="text-xs text-slate-400 mb-1">${item.label}</p>
         <p class="text-2xl font-black" style="color:${item.color}">${item.value}</p>
         <p class="text-xs text-slate-500 mt-0.5 leading-tight">${item.sub}</p>
-        ${i < 3 ? '<div class="absolute -bottom-3 left-1/2 -translate-x-1/2 text-slate-600 text-xs">↓</div>' : ''}
       </div>`).join('')}
     </div>
+    ${ceiLive !== null ? `
+    <div class="mt-3 bg-white/5 rounded-xl px-4 py-2 text-xs text-slate-400 flex flex-wrap gap-4">
+      <span><i class="fas fa-chart-bar mr-1 text-purple-400"></i>Live Decision Concentration: <strong class="text-purple-300">${(ceiLive * 100).toFixed(1)}%</strong> of org decisions resolved by you (30d)</span>
+      <span><i class="fas fa-sitemap mr-1 text-slate-500"></i>Org total: <strong class="text-slate-300">${orgTotal30d}</strong> decisions · Your share: <strong class="text-orange-300">${decisions30d}</strong></span>
+    </div>` : ''}
   </div>
 
   <!-- Signal Radar + Cascade + Pattern -->
@@ -192,7 +220,7 @@ function dashboardPage(
     <!-- Cost Cascade -->
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
       <p class="text-sm font-bold text-slate-800 mb-1">Leadership Cost Cascade™</p>
-      <p class="text-xs text-slate-400 mb-4">CEI = ${(latest.cei as number).toFixed(2)}</p>
+      <p class="text-xs text-slate-400 mb-4">Classified by Risk Score (v3.1): ${(latest.risk_score as number).toFixed(3)}</p>
       <div class="space-y-1.5">
         ${CASCADE_STAGES.map(s => {
           const isActive = s.stage === (latest.cascade_stage as string);
@@ -227,6 +255,10 @@ function dashboardPage(
             <span class="font-semibold text-indigo-600">${(latest.lsi as number).toFixed(3)}</span>
           </div>
           <div class="flex justify-between text-xs">
+            <span class="text-slate-500">LSI_norm (LSI ÷ 5)</span>
+            <span class="font-semibold text-indigo-400">${((latest.lsi_norm as number) ?? ((latest.lsi as number)/5)).toFixed(3)}</span>
+          </div>
+          <div class="flex justify-between text-xs">
             <span class="text-slate-500">LLI_norm (load)</span>
             <span class="font-semibold text-amber-600">${(latest.lli_norm as number).toFixed(3)}</span>
           </div>
@@ -234,9 +266,14 @@ function dashboardPage(
             <span class="text-slate-500">CEI (concentration)</span>
             <span class="font-semibold text-orange-600">${(latest.cei as number).toFixed(3)}</span>
           </div>
-          <div class="border-t border-slate-100 pt-2 flex justify-between text-xs">
-            <span class="text-slate-600 font-medium">Formula: (CEI × LLI_norm) / LSI</span>
-            <span class="font-black" style="color:${latestRiskColor}">${(latest.risk_score as number).toFixed(4)}</span>
+          <div class="border-t border-slate-100 pt-2 space-y-1">
+            <div class="flex justify-between text-xs text-slate-400">
+              <span class="font-mono">(CEI × LLI_norm) / LSI_norm</span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span class="text-slate-600 font-medium">Leadership Risk Score™</span>
+              <span class="font-black text-base" style="color:${latestRiskColor}">${(latest.risk_score as number).toFixed(4)}</span>
+            </div>
           </div>
         </div>
       </div>

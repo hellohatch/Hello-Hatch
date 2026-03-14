@@ -86,8 +86,9 @@ CREATE TABLE IF NOT EXISTS risk_scores (
   ethical_integrity     REAL,
   leadership_durability REAL,
   adaptive_capacity     REAL,
-  -- LSI (1.0 – 5.0)
+  -- LSI (1.0 – 5.0) and LSI_norm (0.0 – 1.0)
   lsi                   REAL,
+  lsi_norm              REAL,   -- v3.1: LSI / 5  →  0.0–1.0 (formula alignment)
   domain_variance       REAL,
   signal_pattern        TEXT,   -- 'Organizational Stabilizer' | 'Strategic Interpreter' | 'Structural Bottleneck Risk' | 'Leadership Load Saturation'
   -- Load (raw 1–5, normalized 0–1)
@@ -97,9 +98,12 @@ CREATE TABLE IF NOT EXISTS risk_scores (
   cei                   REAL,
   cei_total_decisions   INTEGER,
   cei_leader_decisions  INTEGER,
-  cascade_stage         TEXT,   -- 'Healthy Distribution' | 'Emerging Exposure' | ... | 'Organizational Drag'
+  -- Decision Velocity (decisions/day)
+  decision_velocity     REAL,   -- v3.1: total_decisions / days_elapsed
+  velocity_drag         REAL,   -- v3.1: (baseline_velocity - current_velocity) / baseline_velocity
+  cascade_stage         TEXT,   -- v3.1: classified by Risk Score (not CEI alone)
   cascade_level         INTEGER, -- 1–5
-  -- Final Risk Score
+  -- Final Risk Score  (v3.1: (CEI × LLI_norm) / LSI_norm)
   risk_score            REAL,
   risk_level            TEXT,   -- 'Low structural risk' | 'Early exposure' | 'Emerging dependency' | 'Structural bottleneck' | 'Organizational risk'
   -- Trajectory (simple projection)

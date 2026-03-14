@@ -86,24 +86,24 @@ assessment.post('/:id/submit', async (c) => {
   // Run scoring engine
   const scores = computeFullRiskScore(responsesMap, ceiLeader, ceiTotal, historicalScores);
 
-  // Save risk scores
+  // Save risk scores (v3.1: includes lsi_norm)
   await c.env.DB.prepare(`
     INSERT INTO risk_scores (
       assessment_id, leader_id, organization_id,
       stress_regulation, cognitive_breadth, trust_climate, ethical_integrity,
       leadership_durability, adaptive_capacity,
-      lsi, domain_variance, signal_pattern,
+      lsi, lsi_norm, domain_variance, signal_pattern,
       lli_raw, lli_norm,
       cei, cei_total_decisions, cei_leader_decisions,
       cascade_stage, cascade_level,
       risk_score, risk_level, trajectory_direction
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).bind(
     assessmentId, leaderId, orgId,
     scores.stress_regulation, scores.cognitive_breadth,
     scores.trust_climate, scores.ethical_integrity,
     scores.leadership_durability, scores.adaptive_capacity,
-    scores.lsi, scores.domain_variance, scores.signal_pattern,
+    scores.lsi, scores.lsi_norm, scores.domain_variance, scores.signal_pattern,
     scores.lli_raw, scores.lli_norm,
     scores.cei, ceiTotal, ceiLeader,
     scores.cascade_stage, scores.cascade_level,
@@ -145,6 +145,7 @@ assessment.get('/:id/brief', async (c) => {
     leadership_durability: row.leadership_durability as number,
     adaptive_capacity:     row.adaptive_capacity as number,
     lsi:                   row.lsi as number,
+    lsi_norm:              (row.lsi_norm as number) ?? ((row.lsi as number) / 5),
     domain_variance:       row.domain_variance as number,
     signal_pattern:        row.signal_pattern as any,
     lli_raw:               row.lli_raw as number,

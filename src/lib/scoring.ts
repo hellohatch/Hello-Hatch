@@ -1,5 +1,9 @@
-// Leadership Risk Intelligence™ — Scoring Engine v3.0
-// Implements exact formulas from Engineering Architecture Specification v3.0
+// Leadership Risk Intelligence™ — Scoring Engine v3.1
+// VENTURE-GRADE CORRECTIONS:
+//   #1  LSI_norm = LSI / 5  →  aligns all three variables to 0–1 range
+//   #2  Risk Score = (CEI × LLI_norm) / LSI_norm  (not raw LSI)
+//   #3  Cascade Stage classification uses Risk Score, not CEI alone
+//   #4  Decision Velocity = total_decisions / days_elapsed
 
 import type {
   SignalDomain, SignalPattern, CascadeStage, RiskLevel,
@@ -9,8 +13,9 @@ import { QUESTIONS, DOMAIN_META, DOMAIN_KEYS } from './questions.js';
 
 // ─────────────────────────────────────────────────────────────
 // MODEL 1: LEADERSHIP SIGNAL INDEX™
-// Domain Score = Sum(domain responses) / 5   → range 1.0–5.0
-// LSI = (SR + CB + TC + EI + LD + AC) / 6   → range 1.0–5.0
+// Domain Score = Sum(domain responses) / n_questions  → range 1.0–5.0
+// LSI = (SR + CB + TC + EI + LD + AC) / 6            → range 1.0–5.0
+// LSI_norm = LSI / 5                                  → range 0.0–1.0
 // ─────────────────────────────────────────────────────────────
 
 export function computeDomainScore(
@@ -19,15 +24,12 @@ export function computeDomainScore(
 ): number {
   const domainQs = QUESTIONS.filter(q => q.domain === domain && q.scored);
   if (domainQs.length === 0) return 0;
-
   let sum = 0;
   for (const q of domainQs) {
-    const raw = responses.get(q.id) ?? 3; // default neutral
-    // Reverse-scored items: 6 - value  (so 5→1, 4→2, 3→3, 2→4, 1→5)
+    const raw = responses.get(q.id) ?? 3;
     const value = q.reverse ? (6 - raw) : raw;
     sum += value;
   }
-
   return parseFloat((sum / domainQs.length).toFixed(3));
 }
 
@@ -37,21 +39,22 @@ export function computeLSI(domainScores: Record<SignalDomain, number>): number {
   return parseFloat(lsi.toFixed(3));
 }
 
-// ─────────────────────────────────────────────────────────────
-// DOMAIN VARIANCE — for Signal Pattern classification
-// variance = stddev(domain_scores)
-// ─────────────────────────────────────────────────────────────
+/** LSI_norm = LSI / 5  →  converts 1–5 scale to 0–1 for formula alignment */
+export function normalizeLSI(lsi: number): number {
+  return parseFloat((lsi / 5).toFixed(4));
+}
+
 export function computeDomainVariance(domainScores: Record<SignalDomain, number>): number {
   const values = DOMAIN_KEYS.map(k => domainScores[k]);
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
   const variance = values.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / values.length;
-  return parseFloat(Math.sqrt(variance).toFixed(3)); // returning stddev
+  return parseFloat(Math.sqrt(variance).toFixed(3));
 }
 
 // ─────────────────────────────────────────────────────────────
 // MODEL 2: LEADERSHIP LOAD INDEX™
-// LLI_raw  = Sum(load_responses) / 5        → range 1.0–5.0
-// LLI_norm = (LLI_raw - 1) / 4             → range 0.0–1.0
+// LLI_raw  = Sum(load_responses) / 5  → range 1.0–5.0
+// LLI_norm = (LLI_raw - 1) / 4       → range 0.0–1.0
 // ─────────────────────────────────────────────────────────────
 export function computeLLI(responses: Map<string, number>): {
   lli_raw: number;
@@ -75,17 +78,57 @@ export function computeCEI(
   leaderDecisions: number,
   totalDecisions: number
 ): number {
-  if (totalDecisions === 0) return 0.35; // default to Emerging Exposure if unknown
+  if (totalDecisions === 0) return 0.35;
   return parseFloat((leaderDecisions / totalDecisions).toFixed(3));
 }
 
 // ─────────────────────────────────────────────────────────────
-// MODEL 4: LEADERSHIP COST CASCADE™
-// Stage determined by CEI thresholds
+// MODEL 4: DECISION VELOCITY
+// Velocity = total_decisions / days_elapsed
+// Concentration Drag = velocity_baseline - velocity_current
 // ─────────────────────────────────────────────────────────────
-export const CASCADE_STAGES: Array<{
-  level: number;
-  stage: CascadeStage;
+export function computeDecisionVelocity(
+  totalDecisions: number,
+  daysElapsed: number
+): number {
+  if (daysElapsed === 0) return 0;
+  return parseFloat((totalDecisions / daysElapsed).toFixed(2));
+}
+
+export function computeVelocityDrag(
+  baselineVelocity: number,
+  currentVelocity: number
+): number {
+  if (baselineVelocity === 0) return 0;
+  return parseFloat(((baselineVelocity - currentVelocity) / baselineVelocity).toFixed(3));
+}
+
+// ─────────────────────────────────────────────────────────────
+// MODEL 5: LEADERSHIP RISK SCORE™  ← CORRECTED v3.1
+//
+// PREVIOUS (v3.0):  Risk = (CEI × LLI_norm) / LSI
+// CORRECTED (v3.1): Risk = (CEI × LLI_norm) / LSI_norm
+//                   where LSI_norm = LSI / 5
+//
+// This aligns all three variables to 0–1 range, improving
+// interpretability and signal power.
+// ─────────────────────────────────────────────────────────────
+export function computeRiskScore(
+  lsi: number,
+  lli_norm: number,
+  cei: number
+): number {
+  const lsi_norm = normalizeLSI(lsi);
+  if (lsi_norm === 0) return 0;
+  return parseFloat(((cei * lli_norm) / lsi_norm).toFixed(4));
+}
+
+// ─────────────────────────────────────────────────────────────
+// RISK LEVEL BANDS  ← CORRECTED v3.1
+// Using Risk Score (not CEI) with updated thresholds
+// ─────────────────────────────────────────────────────────────
+export const RISK_LEVELS: Array<{
+  level: RiskLevel;
   range: [number, number];
   color: string;
   bg: string;
@@ -93,84 +136,35 @@ export const CASCADE_STAGES: Array<{
   description: string;
 }> = [
   {
-    level: 1,
-    stage: 'Healthy Distribution',
-    range: [0.00, 0.30],
-    color: '#10B981',
-    bg: '#ECFDF5',
-    textColor: '#065F46',
-    description: 'Decision load is well distributed. Leadership capacity is not structurally constrained.',
+    level: 'Low structural risk',
+    range: [0, 0.030],
+    color: '#10B981', bg: '#ECFDF5', textColor: '#065F46',
+    description: 'Leadership signals are strong and structural load is well-managed. No intervention required.',
   },
   {
-    level: 2,
-    stage: 'Emerging Exposure',
-    range: [0.31, 0.45],
-    color: '#84CC16',
-    bg: '#F7FEE7',
-    textColor: '#365314',
-    description: 'Early concentration signals appearing. Preventative attention is warranted.',
+    level: 'Early exposure',
+    range: [0.031, 0.080],
+    color: '#84CC16', bg: '#F7FEE7', textColor: '#365314',
+    description: 'Early risk indicators are present. Preventative attention is warranted.',
   },
   {
-    level: 3,
-    stage: 'Structural Dependency',
-    range: [0.46, 0.65],
-    color: '#F59E0B',
-    bg: '#FFFBEB',
-    textColor: '#78350F',
-    description: 'Organization is structurally dependent on this leader for decision resolution.',
+    level: 'Emerging dependency',
+    range: [0.081, 0.150],
+    color: '#F59E0B', bg: '#FFFBEB', textColor: '#78350F',
+    description: 'Structural dependency is forming. Active monitoring and load management recommended.',
   },
   {
-    level: 4,
-    stage: 'Decision Bottleneck',
-    range: [0.66, 0.80],
-    color: '#F97316',
-    bg: '#FFF7ED',
-    textColor: '#7C2D12',
-    description: 'Decision throughput is critically constrained. Organizational velocity is compromised.',
+    level: 'Structural bottleneck',
+    range: [0.151, 0.300],
+    color: '#F97316', bg: '#FFF7ED', textColor: '#7C2D12',
+    description: 'Decision throughput and organizational velocity are materially compromised.',
   },
   {
-    level: 5,
-    stage: 'Organizational Drag',
-    range: [0.81, 1.00],
-    color: '#EF4444',
-    bg: '#FEF2F2',
-    textColor: '#7F1D1D',
-    description: 'Decision concentration is creating measurable organizational drag and systemic risk.',
+    level: 'Organizational risk',
+    range: [0.301, 999],
+    color: '#EF4444', bg: '#FEF2F2', textColor: '#7F1D1D',
+    description: 'Acute structural risk. Urgent intervention required. The risk is organizational, not personal.',
   },
-];
-
-export function computeCascadeStage(cei: number): {
-  stage: CascadeStage;
-  level: number;
-  stageMeta: typeof CASCADE_STAGES[0];
-} {
-  const stageMeta = CASCADE_STAGES.find(
-    s => cei >= s.range[0] && cei <= s.range[1]
-  ) ?? CASCADE_STAGES[CASCADE_STAGES.length - 1];
-  return { stage: stageMeta.stage, level: stageMeta.level, stageMeta };
-}
-
-// ─────────────────────────────────────────────────────────────
-// LEADERSHIP RISK SCORE™
-// Risk Score = (CEI × LLI_norm) / LSI
-// ─────────────────────────────────────────────────────────────
-export function computeRiskScore(lsi: number, lli_norm: number, cei: number): number {
-  if (lsi === 0) return 0;
-  return parseFloat(((cei * lli_norm) / lsi).toFixed(4));
-}
-
-export const RISK_LEVELS: Array<{
-  level: RiskLevel;
-  range: [number, number];
-  color: string;
-  bg: string;
-  textColor: string;
-}> = [
-  { level: 'Low structural risk',    range: [0,     0.050], color: '#10B981', bg: '#ECFDF5', textColor: '#065F46' },
-  { level: 'Early exposure',         range: [0.051, 0.100], color: '#84CC16', bg: '#F7FEE7', textColor: '#365314' },
-  { level: 'Emerging dependency',    range: [0.101, 0.200], color: '#F59E0B', bg: '#FFFBEB', textColor: '#78350F' },
-  { level: 'Structural bottleneck',  range: [0.201, 0.350], color: '#F97316', bg: '#FFF7ED', textColor: '#7C2D12' },
-  { level: 'Organizational risk',    range: [0.351, 999],   color: '#EF4444', bg: '#FEF2F2', textColor: '#7F1D1D' },
 ];
 
 export function classifyRiskLevel(riskScore: number): RiskLevel {
@@ -179,12 +173,84 @@ export function classifyRiskLevel(riskScore: number): RiskLevel {
 }
 
 export function getRiskLevelMeta(riskScore: number) {
-  return RISK_LEVELS.find(r => riskScore >= r.range[0] && riskScore <= r.range[1]) ?? RISK_LEVELS[RISK_LEVELS.length - 1];
+  return RISK_LEVELS.find(r => riskScore >= r.range[0] && riskScore <= r.range[1])
+    ?? RISK_LEVELS[RISK_LEVELS.length - 1];
+}
+
+// ─────────────────────────────────────────────────────────────
+// MODEL 6: LEADERSHIP COST CASCADE™  ← CORRECTED v3.1
+//
+// PREVIOUS (v3.0): Stage classified by CEI alone
+// CORRECTED (v3.1): Stage classified by Risk Score
+//
+// This makes cascade reflect TRUE structural risk (composite of
+// signals, load, and concentration) — not just concentration alone.
+// ─────────────────────────────────────────────────────────────
+export const CASCADE_STAGES: Array<{
+  level: number;
+  stage: CascadeStage;
+  riskRange: [number, number];  // Risk Score thresholds (not CEI)
+  color: string;
+  bg: string;
+  textColor: string;
+  description: string;
+  action: string;
+}> = [
+  {
+    level: 1,
+    stage: 'Healthy Distribution',
+    riskRange: [0.000, 0.030],
+    color: '#10B981', bg: '#ECFDF5', textColor: '#065F46',
+    description: 'Decision load is well distributed. Leadership capacity is not structurally constrained.',
+    action: 'Maintain current structure. Continue monitoring via quarterly assessments.',
+  },
+  {
+    level: 2,
+    stage: 'Emerging Exposure',
+    riskRange: [0.031, 0.080],
+    color: '#84CC16', bg: '#F7FEE7', textColor: '#365314',
+    description: 'Early concentration signals appearing. Preventative attention is warranted.',
+    action: 'Review decision routing patterns. Begin documenting escalation triggers.',
+  },
+  {
+    level: 3,
+    stage: 'Structural Dependency',
+    riskRange: [0.081, 0.150],
+    color: '#F59E0B', bg: '#FFFBEB', textColor: '#78350F',
+    description: 'Organization is structurally dependent on this leader for decision resolution.',
+    action: 'Initiate delegation architecture review. Map top 10 decision categories for redistribution.',
+  },
+  {
+    level: 4,
+    stage: 'Decision Bottleneck',
+    riskRange: [0.151, 0.300],
+    color: '#F97316', bg: '#FFF7ED', textColor: '#7C2D12',
+    description: 'Decision throughput is critically constrained. Organizational velocity is compromised.',
+    action: 'Immediate structural intervention. Implement decision rights framework within 30 days.',
+  },
+  {
+    level: 5,
+    stage: 'Organizational Drag',
+    riskRange: [0.301, 999],
+    color: '#EF4444', bg: '#FEF2F2', textColor: '#7F1D1D',
+    description: 'Risk Score indicates systemic structural failure. Organizational performance is at acute risk.',
+    action: 'Urgent advisory engagement. Load reduction, succession, and structural redesign are required immediately.',
+  },
+];
+
+export function computeCascadeStage(riskScore: number): {
+  stage: CascadeStage;
+  level: number;
+  stageMeta: typeof CASCADE_STAGES[0];
+} {
+  const stageMeta = CASCADE_STAGES.find(
+    s => riskScore >= s.riskRange[0] && riskScore <= s.riskRange[1]
+  ) ?? CASCADE_STAGES[CASCADE_STAGES.length - 1];
+  return { stage: stageMeta.stage, level: stageMeta.level, stageMeta };
 }
 
 // ─────────────────────────────────────────────────────────────
 // SIGNAL PATTERN CLASSIFICATION
-// Based on LSI, domain variance, LLI, CEI
 // ─────────────────────────────────────────────────────────────
 export const SIGNAL_PATTERN_META: Record<SignalPattern, {
   description: string;
@@ -229,19 +295,16 @@ export function classifySignalPattern(
   const cb = domainScores.cognitive_breadth;
   const ei = domainScores.ethical_integrity;
 
-  // Priority order matters
-  if (lli_norm >= 0.55 && ld < 3.0) return 'Leadership Load Saturation';
-  if (lli_norm >= 0.5  && cei >= 0.46) return 'Structural Bottleneck Risk';
+  if (lli_norm >= 0.55 && ld < 3.0)  return 'Leadership Load Saturation';
+  if (lli_norm >= 0.50 && cei >= 0.46) return 'Structural Bottleneck Risk';
   if (lsi >= 3.8 && domainVariance < 0.5) return 'Organizational Stabilizer';
-  if (cb >= 3.8 && ei >= 3.8) return 'Strategic Interpreter';
-  // Default to the most concerning pattern if none match well
-  if (lli_norm >= 0.5) return 'Structural Bottleneck Risk';
+  if (cb >= 3.8 && ei >= 3.8)         return 'Strategic Interpreter';
+  if (lli_norm >= 0.50)               return 'Structural Bottleneck Risk';
   return 'Organizational Stabilizer';
 }
 
 // ─────────────────────────────────────────────────────────────
-// TRAJECTORY DIRECTION
-// Compares current risk score to historical average
+// TRAJECTORY
 // ─────────────────────────────────────────────────────────────
 export function computeTrajectory(
   currentRiskScore: number,
@@ -250,8 +313,8 @@ export function computeTrajectory(
   if (historicalScores.length === 0) return 'Stable';
   const avgHistorical = historicalScores.reduce((a, b) => a + b, 0) / historicalScores.length;
   const delta = currentRiskScore - avgHistorical;
-  if (delta < -0.01) return 'Improving';
-  if (delta > 0.01)  return 'Declining';
+  if (delta < -0.005) return 'Improving';
+  if (delta > 0.005)  return 'Declining';
   return 'Stable';
 }
 
@@ -270,8 +333,9 @@ export function computeFullRiskScore(
     domainScores[domain] = computeDomainScore(domain, responses);
   }
 
-  // 2. LSI
-  const lsi = computeLSI(domainScores);
+  // 2. LSI + LSI_norm
+  const lsi      = computeLSI(domainScores);
+  const lsi_norm = normalizeLSI(lsi);
   const domain_variance = computeDomainVariance(domainScores);
 
   // 3. LLI
@@ -280,12 +344,12 @@ export function computeFullRiskScore(
   // 4. CEI
   const cei = computeCEI(ceiLeaderDecisions, ceiTotalDecisions);
 
-  // 5. Cascade stage
-  const { stage: cascade_stage, level: cascade_level } = computeCascadeStage(cei);
-
-  // 6. Risk score
+  // 5. Risk Score (uses LSI_norm, not raw LSI)
   const risk_score = computeRiskScore(lsi, lli_norm, cei);
   const risk_level = classifyRiskLevel(risk_score);
+
+  // 6. Cascade stage (now driven by Risk Score, not CEI)
+  const { stage: cascade_stage, level: cascade_level } = computeCascadeStage(risk_score);
 
   // 7. Signal pattern
   const signal_pattern = classifySignalPattern(domainScores, lsi, domain_variance, lli_norm, cei);
@@ -296,6 +360,7 @@ export function computeFullRiskScore(
   return {
     ...domainScores,
     lsi,
+    lsi_norm,
     domain_variance,
     signal_pattern,
     lli_raw,

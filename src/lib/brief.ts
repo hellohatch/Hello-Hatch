@@ -133,9 +133,9 @@ export function generateBriefHTML(
     <!-- The investor visual: Signal → Load → Concentration → Risk -->
     <div class="mt-8 grid grid-cols-4 gap-2">
       ${[
-        { label: 'Leadership Signals', value: scores.lsi.toFixed(2), sub: '/ 5.0', color: '#6366F1' },
-        { label: 'Leadership Load', value: scores.lli_norm.toFixed(2), sub: '/ 1.0', color: '#F59E0B' },
-        { label: 'Decision Concentration', value: (scores.cei * 100).toFixed(0) + '%', sub: 'of decisions', color: '#F97316' },
+        { label: 'Leadership Signals', value: scores.lsi.toFixed(2), sub: `LSI_norm = ${scores.lsi_norm.toFixed(2)}`, color: '#6366F1' },
+        { label: 'Leadership Load', value: scores.lli_norm.toFixed(2), sub: `LLI_norm / 1.0`, color: '#F59E0B' },
+        { label: 'Decision Concentration', value: (scores.cei * 100).toFixed(0) + '%', sub: `CEI = ${scores.cei.toFixed(3)}`, color: '#F97316' },
         { label: 'Structural Risk', value: scores.risk_score.toFixed(3), sub: scores.risk_level, color: riskMeta.color },
       ].map((item, i) => `
       <div class="bg-white/5 border border-white/10 rounded-xl p-4 relative">
@@ -144,6 +144,10 @@ export function generateBriefHTML(
         <p class="text-2xl font-bold" style="color:${item.color}">${item.value}</p>
         <p class="text-xs text-slate-500 mt-0.5">${item.sub}</p>
       </div>`).join('')}
+    </div>
+    <!-- v3.1 formula clarification -->
+    <div class="mt-4 px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-xs text-slate-400 font-mono text-center">
+      Risk Score = (CEI × LLI_norm) / LSI_norm &nbsp;|&nbsp; LSI_norm = LSI / 5 &nbsp;|&nbsp; All variables aligned to 0–1 range
     </div>
   </div>
 
@@ -213,9 +217,15 @@ export function generateBriefHTML(
             ${scoreBar(pct, 100, meta.color)}
           </div>`;
         }).join('')}
-        <div class="pt-3 border-t border-slate-100 flex items-center justify-between">
-          <span class="text-sm font-semibold text-slate-700">Leadership Signal Index™</span>
-          <span class="text-xl font-black text-slate-900">${scores.lsi.toFixed(2)} <span class="text-sm text-slate-400 font-normal">/ 5.0</span></span>
+        <div class="pt-3 border-t border-slate-100 space-y-1.5">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-semibold text-slate-700">Leadership Signal Index™</span>
+            <span class="text-xl font-black text-slate-900">${scores.lsi.toFixed(2)} <span class="text-sm text-slate-400 font-normal">/ 5.0</span></span>
+          </div>
+          <div class="flex items-center justify-between text-xs">
+            <span class="text-slate-400">LSI_norm = LSI / 5</span>
+            <span class="font-bold text-indigo-600">${scores.lsi_norm.toFixed(3)}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -226,7 +236,7 @@ export function generateBriefHTML(
   ═══════════════════════════════════════════ -->
   <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
     <p class="text-sm font-bold text-slate-800 mb-1">Leadership Cost Cascade™</p>
-    <p class="text-xs text-slate-500 mb-5">CEI = ${scores.cei.toFixed(2)} — Decision concentration routing ${(scores.cei * 100).toFixed(0)}% through this leader</p>
+    <p class="text-xs text-slate-500 mb-5">Classified by Risk Score (v3.1): <strong>${scores.risk_score.toFixed(3)}</strong> — CEI = ${scores.cei.toFixed(2)} · LLI_norm = ${scores.lli_norm.toFixed(2)} · LSI_norm = ${scores.lsi_norm.toFixed(3)}</p>
     <div class="flex items-end gap-2 overflow-x-auto pb-2">
       ${CASCADE_STAGES.map((s, i) => {
         const isActive = s.stage === scores.cascade_stage;
@@ -240,7 +250,7 @@ export function generateBriefHTML(
             ${isActive ? `<i class="fas fa-map-marker-alt text-white text-sm"></i>` : ''}
           </div>
           <p class="text-xs font-semibold mt-2 text-center leading-tight" style="color:${isActive ? s.color : '#94A3B8'}">${s.stage}</p>
-          <p class="text-xs text-slate-400 text-center">CEI ${s.range[0].toFixed(2)}–${s.range[1].toFixed(2)}</p>
+          <p class="text-xs text-slate-400 text-center">Risk ${s.riskRange[0].toFixed(2)}–${s.riskRange[1] > 900 ? '∞' : s.riskRange[1].toFixed(2)}</p>
         </div>`;
       }).join('')}
     </div>
@@ -333,7 +343,7 @@ export function generateBriefHTML(
           <div class="flex items-center gap-2 p-2 rounded-lg ${s.stage === scores.cascade_stage ? 'border' : ''}"
             style="${s.stage === scores.cascade_stage ? `background:${s.bg};border-color:${s.color}44` : ''}">
             <div class="w-2 h-2 rounded-full flex-shrink-0" style="background:${s.color}"></div>
-            <span class="text-xs text-slate-500 w-24 flex-shrink-0">${s.range[0].toFixed(2)}–${s.range[1].toFixed(2)}</span>
+            <span class="text-xs text-slate-500 w-24 flex-shrink-0">${s.riskRange[0].toFixed(2)}–${s.riskRange[1] > 900 ? '∞' : s.riskRange[1].toFixed(2)}</span>
             <span class="text-xs font-medium" style="color:${s.stage === scores.cascade_stage ? s.color : '#64748B'}">${s.stage}</span>
           </div>`).join('')}
         </div>

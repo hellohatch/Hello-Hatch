@@ -80,14 +80,17 @@ app.get('/api/formulas', (c) => c.json({
     },
     LRS: {
       name: 'Leadership Risk Score™',
-      formula: 'Risk Score = (CEI × LLI_norm) / LSI',
+      formula_v31: 'Risk Score = (CEI × LLI_norm) / LSI_norm  [v3.1 CORRECTED]',
+      formula_v30: 'Risk Score = (CEI × LLI_norm) / LSI  [deprecated v3.0]',
+      note: 'LSI_norm aligns denominator to 0–1 range for mathematical consistency',
       risk_bands: {
-        '0.000–0.050': 'Low structural risk',
-        '0.051–0.100': 'Early exposure',
-        '0.101–0.200': 'Emerging dependency',
-        '0.201–0.350': 'Structural bottleneck',
-        '> 0.350':     'Organizational risk',
+        '0.000–0.030': 'Low structural risk      → Healthy Distribution',
+        '0.031–0.080': 'Early exposure           → Emerging Exposure',
+        '0.081–0.150': 'Emerging dependency      → Structural Dependency',
+        '0.151–0.300': 'Structural bottleneck    → Decision Bottleneck',
+        '> 0.300':     'Organizational risk      → Organizational Drag',
       },
+      cascade_basis: 'Cascade classified by Risk Score (v3.1) — not CEI alone',
     },
   },
   signal_patterns: [
