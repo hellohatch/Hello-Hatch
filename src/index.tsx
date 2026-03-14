@@ -17,6 +17,18 @@ app.use('/api/*', cors());
 // Root → dashboard
 app.get('/', (c) => c.redirect('/dashboard'));
 
+// Favicon
+app.get('/favicon.ico', (c) => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+    <rect width="32" height="32" rx="6" fill="#4F46E5"/>
+    <polyline points="6,22 12,16 18,19 26,10" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="26" cy="10" r="2" fill="white"/>
+  </svg>`;
+  return new Response(svg, {
+    headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' }
+  });
+});
+
 // Route modules
 app.route('/',           auth);
 app.route('/assessment', assessment);
