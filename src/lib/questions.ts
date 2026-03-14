@@ -1,0 +1,407 @@
+// Leadership Signal Index™ — Question Bank
+// 36 structured items across 6 domains (6 per domain)
+// All items are time-horizon anchored to "last 30-45 days"
+
+import type { AssessmentQuestion } from '../types/index.js';
+
+export const QUESTIONS: AssessmentQuestion[] = [
+  // ─────────────────────────────────────────────────────────────
+  // DOMAIN 1: OPERATIONAL STABILITY (OSI)
+  // ─────────────────────────────────────────────────────────────
+  {
+    id: 'OSI_01',
+    domain: 'operational',
+    text: 'In the last 30–45 days, I have been able to maintain consistent execution rhythms even when facing unexpected disruptions.',
+    weight: 1.4,
+    is_anchor: true,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'OSI_02',
+    domain: 'operational',
+    text: 'Over the past 30–45 days, key decisions within my purview have moved forward without requiring escalation or delay.',
+    weight: 1.2,
+    is_anchor: false,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'OSI_03',
+    domain: 'operational',
+    text: 'In the last 30–45 days, I have struggled to delegate effectively, often doing critical tasks myself instead.',
+    weight: 1.3,
+    is_anchor: false,
+    is_reverse: true,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'OSI_04',
+    domain: 'operational',
+    text: 'My team has functioned predictably over the past 30–45 days, with minimal unexpected performance gaps.',
+    weight: 1.1,
+    is_anchor: false,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'OSI_05',
+    domain: 'operational',
+    text: 'During the last 30–45 days, I have felt that organizational execution is dependent on my personal involvement in most outcomes.',
+    weight: 1.5,
+    is_anchor: true,
+    is_reverse: true,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'OSI_06',
+    domain: 'operational',
+    text: 'In the last 30–45 days, operational continuity would have been maintained even if I had been absent for a week.',
+    weight: 1.2,
+    is_anchor: false,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // DOMAIN 2: COGNITIVE BREADTH (CBI)
+  // ─────────────────────────────────────────────────────────────
+  {
+    id: 'CBI_01',
+    domain: 'cognitive',
+    text: 'In the last 30–45 days, I have actively sought perspectives that challenged or complicated my initial assumptions.',
+    weight: 1.3,
+    is_anchor: true,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'CBI_02',
+    domain: 'cognitive',
+    text: 'Over the past 30–45 days, I have made high-stakes decisions drawing on a breadth of internal and external inputs.',
+    weight: 1.2,
+    is_anchor: false,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'CBI_03',
+    domain: 'cognitive',
+    text: 'In the last 30–45 days, I have noticed that my thinking has defaulted to familiar frameworks rather than exploring novel approaches.',
+    weight: 1.3,
+    is_anchor: false,
+    is_reverse: true,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'CBI_04',
+    domain: 'cognitive',
+    text: 'Over the past 30–45 days, I have been able to hold ambiguity without prematurely forcing resolution.',
+    weight: 1.1,
+    is_anchor: false,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'CBI_05',
+    domain: 'cognitive',
+    text: 'In the last 30–45 days, my cognitive bandwidth has been stretched to the point where I have been less effective at strategic thinking.',
+    weight: 1.4,
+    is_anchor: true,
+    is_reverse: true,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'CBI_06',
+    domain: 'cognitive',
+    text: 'During the last 30–45 days, I have integrated signals from multiple domains (market, people, operations, finance) into my decision-making.',
+    weight: 1.2,
+    is_anchor: false,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // DOMAIN 3: ETHICAL INTEGRITY (EII)
+  // ─────────────────────────────────────────────────────────────
+  {
+    id: 'EII_01',
+    domain: 'ethical',
+    text: 'In the last 30–45 days, I have acted in alignment with stated organizational values even when it created inconvenience or cost.',
+    weight: 1.5,
+    is_anchor: true,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'EII_02',
+    domain: 'ethical',
+    text: 'Over the past 30–45 days, I have been transparent with stakeholders about risks, setbacks, or uncomfortable truths.',
+    weight: 1.3,
+    is_anchor: false,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'EII_03',
+    domain: 'ethical',
+    text: 'In the last 30–45 days, I have felt pressure to compromise on ethical standards to achieve short-term results.',
+    weight: 1.4,
+    is_anchor: false,
+    is_reverse: true,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'EII_04',
+    domain: 'ethical',
+    text: 'My behavior over the past 30–45 days has been consistent whether or not I believed I was being observed.',
+    weight: 1.3,
+    is_anchor: true,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'EII_05',
+    domain: 'ethical',
+    text: 'Over the last 30–45 days, I have encountered situations where I allowed political dynamics to influence decisions that should have been value-based.',
+    weight: 1.2,
+    is_anchor: false,
+    is_reverse: true,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'EII_06',
+    domain: 'ethical',
+    text: 'In the last 30–45 days, I have taken accountability for decisions that did not produce the intended outcome.',
+    weight: 1.1,
+    is_anchor: false,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // DOMAIN 4: TRUST CLIMATE (TCI)
+  // ─────────────────────────────────────────────────────────────
+  {
+    id: 'TCI_01',
+    domain: 'trust',
+    text: 'In the last 30–45 days, members of my team have felt safe raising concerns, dissenting views, or uncomfortable signals.',
+    weight: 1.5,
+    is_anchor: true,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'TCI_02',
+    domain: 'trust',
+    text: 'Over the past 30–45 days, I have actively created conditions where disagreement was welcomed rather than suppressed.',
+    weight: 1.3,
+    is_anchor: false,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'TCI_03',
+    domain: 'trust',
+    text: 'In the last 30–45 days, I have sensed that people around me are filtering information before sharing it with me.',
+    weight: 1.4,
+    is_anchor: false,
+    is_reverse: true,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'TCI_04',
+    domain: 'trust',
+    text: 'Over the past 30–45 days, I have followed through consistently on commitments made to my team.',
+    weight: 1.2,
+    is_anchor: false,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'TCI_05',
+    domain: 'trust',
+    text: 'In the last 30–45 days, interpersonal tensions within the leadership team have required my direct intervention to manage.',
+    weight: 1.1,
+    is_anchor: false,
+    is_reverse: true,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'TCI_06',
+    domain: 'trust',
+    text: 'Over the past 30–45 days, I believe my team has had high confidence in my consistency and judgment.',
+    weight: 1.3,
+    is_anchor: true,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // DOMAIN 5: ADAPTIVE CAPACITY (ACI)
+  // ─────────────────────────────────────────────────────────────
+  {
+    id: 'ACI_01',
+    domain: 'adaptive',
+    text: 'In the last 30–45 days, I have recalibrated my approach in response to meaningful changes in the environment.',
+    weight: 1.4,
+    is_anchor: true,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'ACI_02',
+    domain: 'adaptive',
+    text: 'Over the past 30–45 days, I have been able to shift strategic priorities without losing organizational momentum.',
+    weight: 1.2,
+    is_anchor: false,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'ACI_03',
+    domain: 'adaptive',
+    text: 'In the last 30–45 days, I have resisted changing course even when new information suggested I should.',
+    weight: 1.3,
+    is_anchor: false,
+    is_reverse: true,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'ACI_04',
+    domain: 'adaptive',
+    text: 'Over the past 30–45 days, I have maintained personal effectiveness during periods of significant organizational uncertainty.',
+    weight: 1.2,
+    is_anchor: false,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'ACI_05',
+    domain: 'adaptive',
+    text: 'In the last 30–45 days, I have felt that the pace of change has exceeded my capacity to adapt effectively.',
+    weight: 1.5,
+    is_anchor: true,
+    is_reverse: true,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'ACI_06',
+    domain: 'adaptive',
+    text: 'Over the last 30–45 days, I have modeled adaptive behavior that helped my team remain agile under pressure.',
+    weight: 1.1,
+    is_anchor: false,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // DOMAIN 6: LEADERSHIP DURABILITY (LDI)
+  // ─────────────────────────────────────────────────────────────
+  {
+    id: 'LDI_01',
+    domain: 'durability',
+    text: 'In the last 30–45 days, I have maintained high performance without signs of cognitive fatigue or decision depletion.',
+    weight: 1.4,
+    is_anchor: true,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'LDI_02',
+    domain: 'durability',
+    text: 'Over the past 30–45 days, I have had sufficient recovery and restoration to sustain my leadership effectiveness.',
+    weight: 1.2,
+    is_anchor: false,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'LDI_03',
+    domain: 'durability',
+    text: 'In the last 30–45 days, I have noticed that sustained pressure has begun to erode the quality of my decision-making.',
+    weight: 1.5,
+    is_anchor: false,
+    is_reverse: true,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'LDI_04',
+    domain: 'durability',
+    text: 'Over the past 30–45 days, I have been able to absorb organizational stress without it meaningfully compromising my effectiveness.',
+    weight: 1.3,
+    is_anchor: true,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'LDI_05',
+    domain: 'durability',
+    text: 'In the last 30–45 days, I have found myself relying on reactive patterns (avoidance, over-control, withdrawal) more than I would like.',
+    weight: 1.3,
+    is_anchor: false,
+    is_reverse: true,
+    time_horizon: '30-45 days',
+  },
+  {
+    id: 'LDI_06',
+    domain: 'durability',
+    text: 'Over the past 30–45 days, my leadership has remained consistent in quality across varying levels of organizational pressure.',
+    weight: 1.1,
+    is_anchor: false,
+    is_reverse: false,
+    time_horizon: '30-45 days',
+  },
+];
+
+export const DOMAIN_META: Record<string, { label: string; description: string; color: string; icon: string }> = {
+  operational: {
+    label: 'Operational Stability',
+    description: 'Execution consistency, delegation effectiveness, and organizational independence.',
+    color: '#3B82F6',
+    icon: 'gear',
+  },
+  cognitive: {
+    label: 'Cognitive Breadth',
+    description: 'Strategic thinking range, ambiguity tolerance, and multi-domain integration.',
+    color: '#8B5CF6',
+    icon: 'brain',
+  },
+  ethical: {
+    label: 'Ethical Integrity',
+    description: 'Value alignment, transparency, and accountability under pressure.',
+    color: '#10B981',
+    icon: 'shield',
+  },
+  trust: {
+    label: 'Trust Climate',
+    description: 'Psychological safety, relational consistency, and signal fidelity within the team.',
+    color: '#F59E0B',
+    icon: 'handshake',
+  },
+  adaptive: {
+    label: 'Adaptive Capacity',
+    description: 'Recalibration speed, strategic pivot execution, and change-pace alignment.',
+    color: '#EF4444',
+    icon: 'rotate',
+  },
+  durability: {
+    label: 'Leadership Durability',
+    description: 'Sustained effectiveness, recovery capacity, and stress absorption under pressure.',
+    color: '#06B6D4',
+    icon: 'battery',
+  },
+};
+
+export const CONTEXT_OPTIONS = {
+  role_level: ['C-Suite / Founder', 'VP / SVP', 'Director', 'Senior Manager', 'Manager'],
+  org_stage: [
+    { value: 'early_vc', label: 'Early Stage / Pre-Series B' },
+    { value: 'growth_vc', label: 'Growth Stage / Series B–D' },
+    { value: 'enterprise', label: 'Enterprise / Public Company' },
+  ],
+  team_size: ['1–5', '6–15', '16–50', '51–150', '150+'],
+  decision_volume: ['Low', 'Moderate', 'High', 'Very High'],
+  change_intensity: ['Low', 'Moderate', 'High', 'Very High'],
+  escalation_frequency: ['Rarely', 'Occasionally', 'Frequently', 'Constantly'],
+};

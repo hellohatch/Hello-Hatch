@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "leadership-signal-index",
+  "compatibility_date": "2026-03-14",
+  "pages_build_output_dir": "./dist",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lsi-production",
+      "database_id": "placeholder-replace-after-create"
+    }
+  ]
+}
