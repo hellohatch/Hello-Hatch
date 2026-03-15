@@ -1,4 +1,4 @@
-// Leadership Risk Intelligence™ Platform — Main App Entry (v3.0)
+// Leadership Risk Intelligence™ Platform — Main App Entry (v3.1)
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -40,14 +40,14 @@ app.route('/api',        apiRoutes);
 app.get('/api/health', (c) => c.json({
   status: 'ok',
   platform: 'Leadership Risk Intelligence™',
-  version: '3.0',
+  version: '3.1',
   owner: 'Hatch',
   timestamp: new Date().toISOString(),
 }));
 
 // API: scoring formula reference
 app.get('/api/formulas', (c) => c.json({
-  description: 'Leadership Risk Intelligence™ v3.0 Scoring Formulas',
+  description: 'Leadership Risk Intelligence™ v3.1 Scoring Formulas',
   models: {
     LSI: {
       name: 'Leadership Signal Index™',
@@ -80,17 +80,18 @@ app.get('/api/formulas', (c) => c.json({
     },
     LRS: {
       name: 'Leadership Risk Score™',
-      formula_v31: 'Risk Score = (CEI × LLI_norm) / LSI_norm  [v3.1 CORRECTED]',
-      formula_v30: 'Risk Score = (CEI × LLI_norm) / LSI  [deprecated v3.0]',
-      note: 'LSI_norm aligns denominator to 0–1 range for mathematical consistency',
+      formula: 'Risk Score = (CEI × LLI_norm) / LSI_norm',
+      lsi_norm_formula: 'LSI_norm = LSI / 5  (scales denominator to 0–1 range)',
+      note: 'v3.1: LSI_norm replaces raw LSI in denominator for mathematical consistency',
       risk_bands: {
-        '0.000–0.030': 'Low structural risk      → Healthy Distribution',
-        '0.031–0.080': 'Early exposure           → Emerging Exposure',
-        '0.081–0.150': 'Emerging dependency      → Structural Dependency',
-        '0.151–0.300': 'Structural bottleneck    → Decision Bottleneck',
-        '> 0.300':     'Organizational risk      → Organizational Drag',
+        '0.000–0.030': 'Healthy Distribution  → Low structural risk',
+        '0.031–0.080': 'Early Exposure        → Emerging Exposure',
+        '0.081–0.150': 'Emerging Dependency   → Structural Dependency',
+        '0.151–0.300': 'Structural Bottleneck → Decision Bottleneck',
+        '> 0.300':     'Organizational Drag   → Organizational Drag',
       },
       cascade_basis: 'Cascade classified by Risk Score (v3.1) — not CEI alone',
+      decision_velocity: 'Decision Velocity = total_decisions / days_elapsed (inverse of concentration)',
     },
   },
   signal_patterns: [
@@ -131,7 +132,7 @@ function apiDocsPage(): string {
       <i class="fas fa-code text-xs"></i>
     </div>
     <span class="font-bold text-sm">LRI™ API Documentation</span>
-    <span class="bg-blue-600/20 text-blue-300 text-xs px-2 py-0.5 rounded-full font-medium">v3.0</span>
+    <span class="bg-blue-600/20 text-blue-300 text-xs px-2 py-0.5 rounded-full font-medium">v3.1</span>
   </div>
   <a href="/dashboard" class="text-slate-400 hover:text-white text-xs">← Dashboard</a>
 </nav>
@@ -177,6 +178,12 @@ function apiDocsPage(): string {
       desc: 'Retrieve structured executive brief data for a leader (auth required)',
       auth: true,
       response: '{ leader, assessment, scores, history, formulas }',
+    },
+    {
+      method: 'GET', path: '/api/leader/:id/interventions',
+      desc: 'Structural Intervention Engine™ — returns detected failure patterns, prescriptions, projections (auth required)',
+      auth: true,
+      response: '{ leader_id, scores, intervention_engine: { signals, interventions, projections, system_recommendation, escalation_probability_90d, time_to_next_cascade_days } }',
     },
     {
       method: 'GET', path: '/api/org/portfolio',

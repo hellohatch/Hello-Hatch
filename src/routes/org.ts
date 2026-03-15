@@ -1,5 +1,6 @@
-// Organization Dashboard — Enterprise Portfolio View (v3.1)
+// Organization Dashboard — Enterprise Portfolio View (v3.2 — Structural Intervention Engine™)
 // NEW: Decision Gravity Map, Portfolio Risk Distribution, Org Risk Heatmap, Decision Velocity
+// NEW v3.2: Intervention Intelligence Panel, Portfolio Escalation Monitor
 
 import { Hono } from 'hono';
 import type { Bindings, Variables } from '../types/index.js';
@@ -7,6 +8,8 @@ import { requireAuth } from '../lib/auth.js';
 import { hashPassword } from '../lib/auth.js';
 import { CASCADE_STAGES, RISK_LEVELS, SIGNAL_PATTERN_META } from '../lib/scoring.js';
 import { DOMAIN_META, DOMAIN_KEYS } from '../lib/questions.js';
+import { computeInterventions } from '../lib/interventions.js';
+import { renderOrgInterventionSummary } from '../lib/interventionUI.js';
 
 const org = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 org.use('*', requireAuth);
@@ -71,11 +74,63 @@ org.get('/', async (c) => {
     patternBuckets[sp] = (patternBuckets[sp] ?? 0) + 1;
   }
 
+  // ── Structural Intervention Engine™ — run for each assessed leader ──
+  const orgLeaderScores = assessed.map(l => ({
+    name:        l.name as string,
+    role_level:  l.role_level as string,
+    risk_score:  (l.risk_score as number) ?? 0,
+    cei:         (l.cei as number) ?? 0,
+    lli_norm:    (l.lli_norm as number) ?? 0,
+    lsi:         (l.lsi as number) ?? 0,
+  }));
+
+  const leaderInterventions = assessed.map(l => {
+    const scores = {
+      stress_regulation:     l.stress_regulation as number,
+      cognitive_breadth:     l.cognitive_breadth as number,
+      trust_climate:         l.trust_climate as number,
+      ethical_integrity:     l.ethical_integrity as number,
+      leadership_durability: l.leadership_durability as number,
+      adaptive_capacity:     l.adaptive_capacity as number,
+      lsi:                   l.lsi as number,
+      lsi_norm:              (l.lsi_norm as number) ?? ((l.lsi as number) / 5),
+      domain_variance:       (l.domain_variance as number) ?? 0,
+      signal_pattern:        l.signal_pattern as any,
+      lli_raw:               (l.lli_raw as number) ?? 0,
+      lli_norm:              l.lli_norm as number,
+      cei:                   l.cei as number,
+      cascade_stage:         l.cascade_stage as any,
+      cascade_level:         (l.cascade_level as number) ?? 1,
+      risk_score:            l.risk_score as number,
+      risk_level:            l.risk_level as any,
+      trajectory_direction:  (l.trajectory_direction as any) ?? 'Stable',
+    };
+    if (!scores.lsi || !scores.lli_norm || !scores.cei) return null;
+    return {
+      leader_id:  l.leader_id as number,
+      name:       l.name as string,
+      role_level: l.role_level as string,
+      risk_score: l.risk_score as number,
+      risk_level: l.risk_level as string,
+      report:     computeInterventions(scores, [], orgLeaderScores),
+    };
+  }).filter(Boolean) as Array<{
+    leader_id: number; name: string; role_level: string;
+    risk_score: number; risk_level: string;
+    report: ReturnType<typeof computeInterventions>;
+  }>;
+
+  // Aggregate intervention metrics
+  const activeInterventions = leaderInterventions.filter(l => l.report.interventions.length > 0);
+  const criticalCount = leaderInterventions.filter(l =>
+    l.report.signals.some(s => s.urgency === 'Critical' || s.urgency === 'Acute')
+  ).length;
+
   return c.html(orgPage(
     leaderName, leaderRole, orgRow?.name ?? 'Your Organization',
     orgRow?.industry ?? '', all, assessed,
     avgRisk, avgLSI, riskBuckets, cascadeBuckets, patternBuckets,
-    totalDecisions?.cnt ?? 0
+    totalDecisions?.cnt ?? 0, leaderInterventions, activeInterventions.length, criticalCount
   ));
 });
 
@@ -143,7 +198,10 @@ function orgPage(
   riskBuckets: Record<string, number>,
   cascadeBuckets: Record<string, number>,
   patternBuckets: Record<string, number>,
-  totalOrgDecisions: number
+  totalOrgDecisions: number,
+  leaderInterventions: Array<{ leader_id: number; name: string; role_level: string; risk_score: number; risk_level: string; report: ReturnType<typeof computeInterventions> }> = [],
+  activeInterventionCount: number = 0,
+  criticalCount: number = 0
 ): string {
 
   const rColors: Record<string, string> = {
@@ -289,7 +347,7 @@ function orgPage(
   </div>
 
   <!-- ═══ KPI ROW ═══ -->
-  <div class="grid grid-cols-2 md:grid-cols-6 gap-4">
+  <div class="grid grid-cols-2 md:grid-cols-7 gap-4">
     <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
       <p class="text-xs text-slate-400 mb-1">Total Leaders</p>
       <p class="text-2xl font-black text-slate-900">${all.length}</p>
@@ -313,6 +371,37 @@ function orgPage(
     <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
       <p class="text-xs text-slate-400 mb-1">Org Decisions / 30d</p>
       <p class="text-2xl font-black text-slate-700">${totalOrgDecisions || '—'}</p>
+    </div>
+    <div class="bg-white rounded-xl border ${activeInterventionCount > 0 ? 'border-amber-300' : 'border-slate-200'} p-4 shadow-sm">
+      <p class="text-xs text-slate-400 mb-1">Active Interventions</p>
+      <p class="text-2xl font-black ${activeInterventionCount > 0 ? 'text-amber-600' : 'text-slate-400'}">${activeInterventionCount}</p>
+    </div>
+    <div class="bg-white rounded-xl border ${criticalCount > 0 ? 'border-red-300' : 'border-slate-200'} p-4 shadow-sm">
+      <p class="text-xs text-slate-400 mb-1">Critical / Acute</p>
+      <p class="text-2xl font-black ${criticalCount > 0 ? 'text-red-600' : 'text-slate-400'}">${criticalCount}</p>
+    </div>
+  </div>
+
+  <!-- ═══ STRUCTURAL INTERVENTION ENGINE™ — PORTFOLIO VIEW ═══ -->
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between" style="${activeInterventionCount > 0 ? 'background:linear-gradient(135deg,#FFF7ED,#FEF2F2)' : ''}">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:${activeInterventionCount > 0 ? '#F9731622' : '#E2E8F0'}">
+          <i class="fas fa-brain text-sm" style="color:${activeInterventionCount > 0 ? '#F97316' : '#94A3B8'}"></i>
+        </div>
+        <div>
+          <p class="text-sm font-bold text-slate-800">Structural Intervention Engine™</p>
+          <p class="text-xs text-slate-500">Predictive failure pattern detection · ${activeInterventionCount} leader${activeInterventionCount !== 1 ? 's' : ''} require${activeInterventionCount === 1 ? 's' : ''} intervention</p>
+        </div>
+      </div>
+      ${criticalCount > 0 ? `
+      <div class="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+        <i class="fas fa-radiation text-red-600 text-sm"></i>
+        <span class="text-xs font-bold text-red-700">${criticalCount} Critical</span>
+      </div>` : ''}
+    </div>
+    <div class="p-5">
+      ${renderOrgInterventionSummary(leaderInterventions)}
     </div>
   </div>
 

@@ -1,4 +1,4 @@
-// Leadership Risk Intelligence™ — Core Types (v3.1)
+// Leadership Risk Intelligence™ — Core Types (v3.2 — Structural Intervention Engine™)
 
 export type CascadeStage =
   | 'Healthy Distribution'

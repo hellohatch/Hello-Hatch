@@ -6,6 +6,7 @@ import { requireAuth } from '../lib/auth.js';
 import { QUESTIONS, DOMAIN_META, DOMAIN_KEYS, LOAD_QUESTIONS, ORIENTATION_Q } from '../lib/questions.js';
 import { computeFullRiskScore } from '../lib/scoring.js';
 import { generateBriefHTML } from '../lib/brief.js';
+import { computeInterventions } from '../lib/interventions.js';
 
 const assessment = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 assessment.use('*', requireAuth);
@@ -162,6 +163,11 @@ assessment.get('/:id/brief', async (c) => {
     'SELECT risk_score FROM risk_scores WHERE leader_id=? AND assessment_id!=? ORDER BY created_at DESC LIMIT 5'
   ).bind(leaderId, assessmentId).all<{ risk_score: number }>();
 
+  const historicalScores = (historical.results ?? []).map(r => r.risk_score);
+
+  // Run Structural Intervention Engine™
+  const interventionReport = computeInterventions(scores, historicalScores);
+
   return c.html(generateBriefHTML(
     row.name as string,
     row.org_name as string,
@@ -169,7 +175,8 @@ assessment.get('/:id/brief', async (c) => {
     scores,
     row.future_orientation as string ?? '',
     row.completed_at as string,
-    (historical.results ?? []).map(r => r.risk_score)
+    historicalScores,
+    interventionReport
   ));
 });
 

@@ -1,10 +1,12 @@
-// Leader Dashboard — Personal Intelligence View
+// Leader Dashboard — Personal Intelligence View (v3.2 — Structural Intervention Engine™)
 
 import { Hono } from 'hono';
 import type { Bindings, Variables } from '../types/index.js';
 import { requireAuth } from '../lib/auth.js';
 import { RISK_LEVELS, CASCADE_STAGES, SIGNAL_PATTERN_META } from '../lib/scoring.js';
 import { DOMAIN_META, DOMAIN_KEYS } from '../lib/questions.js';
+import { computeInterventions } from '../lib/interventions.js';
+import { renderInterventionPanel } from '../lib/interventionUI.js';
 
 const dashboard = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 dashboard.use('*', requireAuth);
@@ -55,9 +57,37 @@ dashboard.get('/', async (c) => {
   const velocity      = activeDays > 0 ? parseFloat((decisions30d / 30).toFixed(2)) : 0;
   const ceiLive       = orgTotal30d > 0 ? parseFloat((decisions30d / orgTotal30d).toFixed(3)) : null;
 
+  // ── Structural Intervention Engine™ ──
+  // Build intervention report from latest assessment scores
+  const historicalScores = (history.results ?? []).map(h => h.risk_score as number).slice(1); // exclude latest
+  const interventionReport = latest ? computeInterventions(
+    {
+      stress_regulation:     latest.stress_regulation as number,
+      cognitive_breadth:     latest.cognitive_breadth as number,
+      trust_climate:         latest.trust_climate as number,
+      ethical_integrity:     latest.ethical_integrity as number,
+      leadership_durability: latest.leadership_durability as number,
+      adaptive_capacity:     latest.adaptive_capacity as number,
+      lsi:                   latest.lsi as number,
+      lsi_norm:              (latest.lsi_norm as number) ?? ((latest.lsi as number) / 5),
+      domain_variance:       latest.domain_variance as number,
+      signal_pattern:        latest.signal_pattern as any,
+      lli_raw:               latest.lli_raw as number,
+      lli_norm:              latest.lli_norm as number,
+      cei:                   latest.cei as number,
+      cascade_stage:         latest.cascade_stage as any,
+      cascade_level:         latest.cascade_level as number,
+      risk_score:            latest.risk_score as number,
+      risk_level:            latest.risk_level as any,
+      trajectory_direction:  latest.trajectory_direction as any,
+    },
+    historicalScores
+  ) : null;
+
   return c.html(dashboardPage(
     leaderName, latest, history.results ?? [], inProg?.assessment_id ?? null,
-    decisions30d, orgTotal30d, velocity, ceiLive
+    decisions30d, orgTotal30d, velocity, ceiLive,
+    interventionReport
   ));
 });
 
@@ -70,7 +100,8 @@ function dashboardPage(
   decisions30d: number = 0,
   orgTotal30d: number = 0,
   velocity: number = 0,
-  ceiLive: number | null = null
+  ceiLive: number | null = null,
+  interventionReport: ReturnType<typeof computeInterventions> | null = null
 ): string {
 
   const riskColors: Record<string, string> = {
@@ -296,6 +327,9 @@ function dashboardPage(
       <canvas id="lsiTrend" height="100"></canvas>
     </div>
   </div>` : ''}
+
+  <!-- ═══ STRUCTURAL INTERVENTION ENGINE™ ═══ -->
+  ${interventionReport ? renderInterventionPanel(interventionReport, latest.assessment_id as number) : ''}
 
   <!-- History Table -->
   <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">

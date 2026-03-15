@@ -7,6 +7,8 @@ import {
   CASCADE_STAGES, RISK_LEVELS, SIGNAL_PATTERN_META,
   getRiskLevelMeta,
 } from './scoring.js';
+import type { InterventionReport } from './interventions.js';
+import { renderBriefInterventionSection } from './interventionUI.js';
 
 const DOMAIN_LABEL: Record<SignalDomain, string> = {
   stress_regulation: 'Stress Regulation',
@@ -38,7 +40,8 @@ export function generateBriefHTML(
   scores: RiskScoreResult,
   futureOrientation: string,
   assessmentDate: string,
-  previousRiskScores: number[] = []
+  previousRiskScores: number[] = [],
+  interventionReport?: InterventionReport | null
 ): string {
   const riskMeta  = getRiskLevelMeta(scores.risk_score);
   const stageMeta = CASCADE_STAGES.find(s => s.stage === scores.cascade_stage)!;
@@ -371,6 +374,23 @@ export function generateBriefHTML(
       </div>`).join('')}
     </div>
   </div>
+
+  <!-- ═══════════════════════════════════════════
+       STRUCTURAL INTERVENTION ENGINE™
+  ═══════════════════════════════════════════ -->
+  ${interventionReport ? `
+  <div>
+    <div class="flex items-center gap-3 mb-4">
+      <div class="w-8 h-8 bg-indigo-600 rounded-xl flex items-center justify-center">
+        <i class="fas fa-cogs text-white text-sm"></i>
+      </div>
+      <div>
+        <h2 class="text-base font-bold text-slate-900">Structural Intervention Engine™</h2>
+        <p class="text-xs text-slate-400">AI-powered structural failure detection and prescription</p>
+      </div>
+    </div>
+    ${renderBriefInterventionSection(interventionReport)}
+  </div>` : ''}
 
   <!-- ═══════════════════════════════════════════
        ORGANIZATIONAL IMPLICATIONS

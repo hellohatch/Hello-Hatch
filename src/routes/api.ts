@@ -2,6 +2,7 @@
 // POST /api/signals/calculate
 // POST /api/risk/calculate
 // GET  /api/leader/:id/brief
+// GET  /api/leader/:id/interventions  ← NEW: Structural Intervention Engine™
 // POST /api/decisions/ingest
 // GET  /api/org/portfolio
 
@@ -17,6 +18,7 @@ import {
 } from '../lib/scoring.js';
 import { QUESTIONS, DOMAIN_KEYS, DOMAIN_META } from '../lib/questions.js';
 import type { SignalDomain, RiskScoreResult } from '../types/index.js';
+import { computeInterventions } from '../lib/interventions.js';
 
 const api = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
@@ -329,6 +331,124 @@ api.post('/decisions/ingest', requireAuth, async (c) => {
   await c.env.DB.batch(inserts);
 
   return c.json({ success: true, ingested: body.events.length });
+});
+
+// ─────────────────────────────────────────────────────────────
+// GET /api/leader/:id/interventions
+// Returns full Structural Intervention Engine™ report as JSON
+// ─────────────────────────────────────────────────────────────
+api.get('/leader/:id/interventions', requireAuth, async (c) => {
+  const leaderId   = parseInt(c.req.param('id'), 10);
+  const orgId      = c.get('orgId');
+  const leaderRole = c.get('leaderRole');
+  const myLeaderId = c.get('leaderId');
+
+  // Access control: admins can view any leader; leaders only themselves
+  if (leaderRole !== 'admin' && myLeaderId !== leaderId) {
+    return c.json({ error: 'Access denied' }, 403);
+  }
+
+  // Fetch latest completed assessment + risk scores
+  const row = await c.env.DB.prepare(`
+    SELECT rs.*, a.completed_at, l.name, l.role_level,
+           o.name AS org_name
+    FROM risk_scores rs
+    JOIN assessments a  ON a.assessment_id = rs.assessment_id
+    JOIN leaders l      ON l.leader_id = rs.leader_id
+    JOIN organizations o ON o.organization_id = rs.organization_id
+    WHERE rs.leader_id=? AND rs.organization_id=? AND a.status='completed'
+    ORDER BY rs.created_at DESC LIMIT 1
+  `).bind(leaderId, orgId).first();
+
+  if (!row) return c.json({ error: 'No completed assessment found' }, 404);
+
+  const scores: RiskScoreResult = {
+    stress_regulation:     row.stress_regulation as number,
+    cognitive_breadth:     row.cognitive_breadth as number,
+    trust_climate:         row.trust_climate as number,
+    ethical_integrity:     row.ethical_integrity as number,
+    leadership_durability: row.leadership_durability as number,
+    adaptive_capacity:     row.adaptive_capacity as number,
+    lsi:                   row.lsi as number,
+    lsi_norm:              (row.lsi_norm as number) ?? ((row.lsi as number) / 5),
+    domain_variance:       (row.domain_variance as number) ?? 0,
+    signal_pattern:        row.signal_pattern as any,
+    lli_raw:               (row.lli_raw as number) ?? 0,
+    lli_norm:              row.lli_norm as number,
+    cei:                   row.cei as number,
+    cascade_stage:         row.cascade_stage as any,
+    cascade_level:         (row.cascade_level as number) ?? 1,
+    risk_score:            row.risk_score as number,
+    risk_level:            row.risk_level as any,
+    trajectory_direction:  (row.trajectory_direction as any) ?? 'Stable',
+  };
+
+  // Historical scores for trajectory modelling
+  const hist = await c.env.DB.prepare(
+    'SELECT risk_score FROM risk_scores WHERE leader_id=? ORDER BY created_at DESC LIMIT 8'
+  ).bind(leaderId).all<{ risk_score: number }>();
+  const historicalScores = (hist.results ?? []).map(h => h.risk_score).slice(1);
+
+  // Org-level peer scores for Executive Dependency detection
+  const orgScores = await c.env.DB.prepare(`
+    SELECT l.name, l.role_level, rs.risk_score, rs.cei, rs.lli_norm, rs.lsi
+    FROM risk_scores rs
+    JOIN leaders l ON l.leader_id = rs.leader_id
+    WHERE rs.organization_id=?
+    ORDER BY rs.created_at DESC
+  `).bind(orgId).all<{ name: string; role_level: string; risk_score: number; cei: number; lli_norm: number; lsi: number }>();
+
+  const orgLeaderScores = (orgScores.results ?? []);
+
+  const report = computeInterventions(scores, historicalScores, orgLeaderScores);
+
+  return c.json({
+    leader_id:    leaderId,
+    leader_name:  row.name as string,
+    role_level:   row.role_level as string,
+    assessment_date: row.completed_at as string,
+    scores: {
+      risk_score:    scores.risk_score,
+      risk_level:    scores.risk_level,
+      cascade_stage: scores.cascade_stage,
+      lsi:           scores.lsi,
+      lsi_norm:      scores.lsi_norm,
+      lli_norm:      scores.lli_norm,
+      cei:           scores.cei,
+    },
+    intervention_engine: {
+      primary_pattern:           report.primary_pattern,
+      is_compound:               report.is_compound,
+      system_recommendation:     report.system_recommendation,
+      escalation_probability_90d: report.escalation_probability_90d,
+      time_to_next_cascade_days: report.time_to_next_cascade_days,
+      estimated_cost_of_inaction: report.estimated_cost_of_inaction,
+      signals: report.signals.map(s => ({
+        pattern:     s.pattern,
+        label:       s.label,
+        description: s.description,
+        evidence:    s.evidence,
+        severity:    s.severity,
+        urgency:     s.urgency,
+        confidence:  s.confidence,
+      })),
+      interventions: report.interventions.map(i => ({
+        id:                       i.id,
+        type:                     i.type,
+        title:                    i.title,
+        rationale:                i.rationale,
+        time_to_escalation_days:  i.time_to_escalation_days,
+        expected_risk_reduction:  i.expected_risk_reduction,
+        expected_risk_pct:        i.expected_risk_pct,
+        implementation_weeks:     i.implementation_weeks,
+        effort:                   i.effort,
+        owner:                    i.owner,
+        priority:                 i.priority,
+        actions:                  i.actions,
+      })),
+      projections: report.projections,
+    },
+  });
 });
 
 export default api;
