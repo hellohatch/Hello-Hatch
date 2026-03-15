@@ -1,27 +1,29 @@
 {
-  "name": "leadership-signal-index",
+  "name": "hatch-lri",
+  "version": "3.2.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:sandbox": "wrangler pages dev dist --d1=lsi-production --local --ip 0.0.0.0 --port 3000",
-    "build": "vite build",
-    "preview": "wrangler pages dev dist --d1=lsi-production --local",
-    "deploy": "npm run build && wrangler pages deploy dist",
-    "deploy:prod": "npm run build && wrangler pages deploy dist --project-name leadership-signal-index",
-    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
-    "db:create": "wrangler d1 create lsi-production",
+    "start":            "node --import tsx/esm server.ts",
+    "start:prod":       "NODE_ENV=production node --import tsx/esm server.ts",
+    "dev":              "NODE_ENV=development node --watch --import tsx/esm server.ts",
+    "dev:cf":           "vite",
+    "dev:sandbox":      "wrangler pages dev dist --d1=lsi-production --local --ip 0.0.0.0 --port 3000",
+    "build":            "vite build",
     "db:migrate:local": "wrangler d1 migrations apply lsi-production --local",
-    "db:migrate:prod": "wrangler d1 migrations apply lsi-production",
-    "db:seed": "wrangler d1 execute lsi-production --local --file=./seed.sql",
-    "db:reset": "rm -rf .wrangler/state/v3/d1 && npm run db:migrate:local && npm run db:seed",
-    "db:console:local": "wrangler d1 execute lsi-production --local"
+    "db:migrate:prod":  "wrangler d1 migrations apply lsi-production",
+    "db:seed":          "wrangler d1 execute lsi-production --local --file=./seed.sql",
+    "db:reset":         "rm -rf .wrangler/state/v3/d1 && npm run db:migrate:local && npm run db:seed"
   },
   "dependencies": {
+    "@hono/node-server": "^1.19.11",
+    "better-sqlite3": "^12.8.0",
     "hono": "^4.12.8"
   },
   "devDependencies": {
     "@hono/vite-build": "^1.2.0",
     "@hono/vite-dev-server": "^0.18.2",
+    "@types/better-sqlite3": "^7.6.13",
+    "tsx": "^4.21.0",
     "vite": "^6.3.5",
     "wrangler": "^4.4.0"
   }

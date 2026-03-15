@@ -451,4 +451,67 @@ api.get('/leader/:id/interventions', requireAuth, async (c) => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────
+// GET /api/formulas  — scoring formula reference (shared handler)
+// ─────────────────────────────────────────────────────────────
+export function formulasHandler() {
+  return {
+    description: 'Leadership Risk Intelligence™ v3.2 Scoring Formulas',
+    models: {
+      LSI: {
+        name: 'Leadership Signal Index™',
+        formula: 'LSI = (SR + CB + TC + EI + LD + AC) / 6',
+        range: '1.0 – 5.0',
+        domains: ['Stress Regulation (SR)', 'Cognitive Breadth (CB)', 'Trust Climate (TC)',
+                  'Ethical Integrity (EI)', 'Leadership Durability (LD)', 'Adaptive Capacity (AC)'],
+        domain_formula: 'Domain Score = Sum(domain responses) / 5',
+        questions: '30 signal questions (5 per domain)',
+      },
+      LLI: {
+        name: 'Leadership Load Index™',
+        formula_raw:  'LLI_raw = Sum(load_responses) / 5',
+        formula_norm: 'LLI_norm = (LLI_raw - 1) / 4',
+        range_raw:  '1.0 – 5.0',
+        range_norm: '0.0 – 1.0',
+        questions: '5 load questions',
+      },
+      CEI: {
+        name: 'Concentration Exposure Index™',
+        formula: 'CEI = leader_decisions / total_decisions',
+        range: '0.0 – 1.0',
+        thresholds: {
+          '0.00–0.30': 'Healthy Distribution',
+          '0.31–0.45': 'Early Exposure',
+          '0.46–0.65': 'Emerging Dependency',
+          '0.66–0.80': 'Structural Bottleneck',
+          '0.81–1.00': 'Organizational Drag',
+        },
+      },
+      LRS: {
+        name: 'Leadership Risk Score™',
+        formula: 'Risk Score = (CEI × LLI_norm) / LSI_norm',
+        lsi_norm_formula: 'LSI_norm = LSI / 5  (scales denominator to 0–1 range)',
+        note: 'v3.2: LSI_norm replaces raw LSI in denominator for mathematical consistency',
+        risk_bands: {
+          '< 0.030':     'Low Structural Risk   → Healthy Distribution',
+          '0.030–0.080': 'Early Exposure        → Early Exposure',
+          '0.080–0.150': 'Emerging Dependency   → Emerging Dependency',
+          '0.150–0.300': 'Structural Bottleneck → Structural Bottleneck',
+          '> 0.300':     'Organizational Drag   → Organizational Drag',
+        },
+        cascade_basis: 'Cascade classified by Risk Score (v3.2) — not CEI alone',
+        decision_velocity: 'Decision Velocity = total_decisions / days_elapsed (inverse of concentration)',
+      },
+    },
+    signal_patterns: [
+      'Organizational Stabilizer',
+      'Strategic Interpreter',
+      'Structural Bottleneck Risk',
+      'Leadership Load Saturation',
+    ],
+  };
+}
+
+api.get('/formulas', (c) => c.json(formulasHandler()));
+
 export default api;
