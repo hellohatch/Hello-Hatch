@@ -5,7 +5,7 @@
 
 set -e
 
-DOMAIN="${1:-YOUR_DOMAIN}"
+DOMAIN="${1:-app.hellohatch.ai}"
 APP_DIR="/var/www/hatch-lri"
 LOG_DIR="/var/log/hatch-lri"
 
