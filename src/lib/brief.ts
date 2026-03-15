@@ -9,6 +9,8 @@ import {
 } from './scoring.js';
 import type { InterventionReport } from './interventions.js';
 import { renderBriefInterventionSection } from './interventionUI.js';
+import type { CalibratedRiskResult } from './fusion.js';
+import { renderBriefTelemetrySection } from './telemetryUI.js';
 
 const DOMAIN_LABEL: Record<SignalDomain, string> = {
   stress_regulation: 'Stress Regulation',
@@ -41,7 +43,8 @@ export function generateBriefHTML(
   futureOrientation: string,
   assessmentDate: string,
   previousRiskScores: number[] = [],
-  interventionReport?: InterventionReport | null
+  interventionReport?: InterventionReport | null,
+  fusionResult?: CalibratedRiskResult | null
 ): string {
   const riskMeta  = getRiskLevelMeta(scores.risk_score);
   const stageMeta = CASCADE_STAGES.find(s => s.stage === scores.cascade_stage)!;
@@ -393,6 +396,22 @@ export function generateBriefHTML(
   </div>` : ''}
 
   <!-- ═══════════════════════════════════════════
+       STRUCTURAL TELEMETRY LAYER™
+  ═══════════════════════════════════════════ -->
+  <div>
+    <div class="flex items-center gap-3 mb-4">
+      <div class="w-8 h-8 bg-violet-600 rounded-xl flex items-center justify-center">
+        <i class="fas fa-satellite-dish text-white text-sm"></i>
+      </div>
+      <div>
+        <h2 class="text-base font-bold text-slate-900">Structural Telemetry Layer™</h2>
+        <p class="text-xs text-slate-400">Operational metadata calibration · ${fusionResult ? fusionResult.mode : 'Assessment Mode'}</p>
+      </div>
+    </div>
+    ${fusionResult ? renderBriefTelemetrySection(fusionResult) : renderBriefTelemetrySection({ mode: 'Assessment', telemetry_confidence: 0, assessment: { lli_norm: scores.lli_norm, cei: scores.cei, lsi_norm: scores.lsi_norm, risk_score: scores.risk_score, risk_level: scores.risk_level, cascade_stage: scores.cascade_stage }, calibrated: { lli_norm: scores.lli_norm, cei: scores.cei, lsi_norm: scores.lsi_norm, risk_score: scores.risk_score, risk_level: scores.risk_level, cascade_stage: scores.cascade_stage, cascade_level: scores.cascade_level, rpi: 0 }, divergence: { pattern: null, label: '', description: '', implication: '', color: '#94A3B8', icon: 'plug', severity: 'None', lli_divergence: 0, cei_divergence: 0, divergence_magnitude: 0 }, confidence: { overall: 0, label: 'Assessment Only', color: '#94A3B8', components: { telemetry_completeness: 0, signal_agreement: 0, period_coverage: 0 } }, telemetry: { tli: 0, tci: 0, rpi: 0, telemetry_composite: 0, data_confidence: 0, signal_completeness: 0 }, fusion_insight: '' })}
+  </div>
+
+  <!-- ═══════════════════════════════════════════
        ORGANIZATIONAL IMPLICATIONS
   ═══════════════════════════════════════════ -->
   <div class="bg-slate-50 rounded-2xl border border-slate-200 p-6">
@@ -595,18 +614,18 @@ function generateScenarios(scores: RiskScoreResult): Array<{
 }
 
 function classifyRiskLevelSimple(rs: number): string {
-  if (rs <= 0.05)  return 'Low structural risk';
-  if (rs <= 0.10)  return 'Early exposure';
-  if (rs <= 0.20)  return 'Emerging dependency';
-  if (rs <= 0.35)  return 'Structural bottleneck';
-  return 'Organizational risk';
+  if (rs < 0.030) return 'Low Structural Risk';
+  if (rs < 0.080) return 'Early Exposure';
+  if (rs < 0.150) return 'Emerging Dependency';
+  if (rs < 0.300) return 'Structural Bottleneck';
+  return 'Organizational Drag';
 }
 
 function getCascadeStageSimple(cei: number): string {
-  if (cei <= 0.30) return 'Healthy Distribution';
-  if (cei <= 0.45) return 'Emerging Exposure';
-  if (cei <= 0.65) return 'Structural Dependency';
-  if (cei <= 0.80) return 'Decision Bottleneck';
+  if (cei < 0.30) return 'Healthy Distribution';
+  if (cei < 0.45) return 'Early Exposure';
+  if (cei < 0.65) return 'Emerging Dependency';
+  if (cei < 0.80) return 'Structural Bottleneck';
   return 'Organizational Drag';
 }
 
@@ -633,16 +652,16 @@ function getPatternOrgImplication(pattern: SignalPattern): string {
 }
 
 function getFinalPerspective(scores: RiskScoreResult, name: string): string {
-  if (scores.risk_level === 'Low structural risk') {
+  if (scores.risk_level === 'Low Structural Risk') {
     return `${name} is operating with strong signal integrity and healthy structural distribution. The current profile represents a high-functioning leadership system. The priority is maintenance, longitudinal tracking, and ensuring that current conditions do not drift under future load increases.`;
   }
-  if (scores.risk_level === 'Early exposure') {
+  if (scores.risk_level === 'Early Exposure') {
     return `${name}'s profile shows a leader performing with solid signals but with emerging structural exposure. This is the optimal window for preventative structural investment — before concentration and load dynamics compound into measurable risk.`;
   }
-  if (scores.risk_level === 'Emerging dependency') {
+  if (scores.risk_level === 'Emerging Dependency') {
     return `The structural dynamics around ${name}'s leadership are beginning to create organizational dependency. Signal quality remains a buffer, but the convergence of load and concentration requires active intervention. Delay increases the cost and timeline of correction.`;
   }
-  if (scores.risk_level === 'Structural bottleneck') {
+  if (scores.risk_level === 'Structural Bottleneck') {
     return `${name} is operating at the threshold of structural bottleneck. The organization's decision throughput and velocity are materially compromised. Immediate structural redesign — including delegation architecture and decision routing reform — is recommended.`;
   }
   return `The convergence of signals, load, and concentration in ${name}'s profile represents an acute organizational risk condition. Leadership capacity is under systemic pressure. The priority is urgent structural intervention, not performance optimization. The risk is organizational, not personal.`;

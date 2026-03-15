@@ -1,6 +1,7 @@
-// Organization Dashboard — Enterprise Portfolio View (v3.2 — Structural Intervention Engine™)
+// Organization Dashboard — Enterprise Portfolio View (v3.2 — Telemetry Architecture)
 // NEW: Decision Gravity Map, Portfolio Risk Distribution, Org Risk Heatmap, Decision Velocity
 // NEW v3.2: Intervention Intelligence Panel, Portfolio Escalation Monitor
+// NEW v3.2: Structural Telemetry Layer™ integration
 
 import { Hono } from 'hono';
 import type { Bindings, Variables } from '../types/index.js';
@@ -10,6 +11,7 @@ import { CASCADE_STAGES, RISK_LEVELS, SIGNAL_PATTERN_META } from '../lib/scoring
 import { DOMAIN_META, DOMAIN_KEYS } from '../lib/questions.js';
 import { computeInterventions } from '../lib/interventions.js';
 import { renderOrgInterventionSummary } from '../lib/interventionUI.js';
+import { renderOrgTelemetrySummary } from '../lib/telemetryUI.js';
 
 const org = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 org.use('*', requireAuth);
@@ -59,8 +61,8 @@ org.get('/', async (c) => {
 
   // Risk distribution (v3.1 bands)
   const riskBuckets: Record<string, number> = {
-    'Low structural risk': 0, 'Early exposure': 0,
-    'Emerging dependency': 0, 'Structural bottleneck': 0, 'Organizational risk': 0,
+    'Low Structural Risk': 0, 'Early Exposure': 0,
+    'Emerging Dependency': 0, 'Structural Bottleneck': 0, 'Organizational Drag': 0,
   };
   const cascadeBuckets: Record<string, number> = {};
   const patternBuckets: Record<string, number> = {};
@@ -126,11 +128,33 @@ org.get('/', async (c) => {
     l.report.signals.some(s => s.urgency === 'Critical' || s.urgency === 'Acute')
   ).length;
 
+  // ── Telemetry portfolio summary ──
+  const telemetryRows = await c.env.DB.prepare(`
+    SELECT l.leader_id, l.name, l.role_level,
+           t.tli, t.tci, t.rpi, t.data_confidence,
+           f.operational_mode, f.calibrated_risk_score, f.assessment_risk_score,
+           f.divergence_pattern, f.divergence_severity, f.confidence_overall
+    FROM leaders l
+    LEFT JOIN telemetry_snapshots t ON t.leader_id=l.leader_id AND t.organization_id=?
+      AND t.created_at=(SELECT MAX(ts2.created_at) FROM telemetry_snapshots ts2 WHERE ts2.leader_id=l.leader_id AND ts2.organization_id=?)
+    LEFT JOIN fusion_results f ON f.leader_id=l.leader_id AND f.organization_id=?
+      AND f.created_at=(SELECT MAX(fr2.created_at) FROM fusion_results fr2 WHERE fr2.leader_id=l.leader_id AND fr2.organization_id=?)
+    WHERE l.organization_id=? AND l.system_role='leader'
+    ORDER BY COALESCE(t.tli, 0) DESC
+  `).bind(orgId, orgId, orgId, orgId, orgId).all();
+
+  const telRows = (telemetryRows.results ?? []) as Array<{ leader_id: number; name: string; role_level: string; tli: number|null; tci: number|null; rpi: number|null; operational_mode: string|null; calibrated_risk_score: number|null; assessment_risk_score: number|null; divergence_pattern: string|null; divergence_severity: string|null; confidence_overall: number|null }>;
+  const withTel = telRows.filter(r => r.tli !== null);
+  const avgTLI = withTel.length ? parseFloat((withTel.reduce((s,r) => s + r.tli!, 0) / withTel.length).toFixed(3)) : null;
+  const avgTCI = withTel.length ? parseFloat((withTel.reduce((s,r) => s + r.tci!, 0) / withTel.length).toFixed(3)) : null;
+  const avgRPI = withTel.length ? parseFloat((withTel.reduce((s,r) => s + r.rpi!, 0) / withTel.length).toFixed(3)) : null;
+
   return c.html(orgPage(
     leaderName, leaderRole, orgRow?.name ?? 'Your Organization',
     orgRow?.industry ?? '', all, assessed,
     avgRisk, avgLSI, riskBuckets, cascadeBuckets, patternBuckets,
-    totalDecisions?.cnt ?? 0, leaderInterventions, activeInterventions.length, criticalCount
+    totalDecisions?.cnt ?? 0, leaderInterventions, activeInterventions.length, criticalCount,
+    telRows, avgTLI, avgTCI, avgRPI
   ));
 });
 
@@ -201,20 +225,24 @@ function orgPage(
   totalOrgDecisions: number,
   leaderInterventions: Array<{ leader_id: number; name: string; role_level: string; risk_score: number; risk_level: string; report: ReturnType<typeof computeInterventions> }> = [],
   activeInterventionCount: number = 0,
-  criticalCount: number = 0
+  criticalCount: number = 0,
+  telRows: Array<{ leader_id: number; name: string; role_level: string; tli: number|null; tci: number|null; rpi: number|null; operational_mode: string|null; calibrated_risk_score: number|null; assessment_risk_score: number|null; divergence_pattern: string|null; divergence_severity: string|null; confidence_overall: number|null }> = [],
+  avgTLI: number | null = null,
+  avgTCI: number | null = null,
+  avgRPI: number | null = null
 ): string {
 
   const rColors: Record<string, string> = {
-    'Low structural risk': '#10B981', 'Early exposure': '#84CC16',
-    'Emerging dependency': '#F59E0B', 'Structural bottleneck': '#F97316',
-    'Organizational risk': '#EF4444',
-  };
-  const cColors: Record<string, string> = {
-    'Healthy Distribution': '#10B981', 'Emerging Exposure': '#84CC16',
-    'Structural Dependency': '#F59E0B', 'Decision Bottleneck': '#F97316',
+    'Low Structural Risk': '#10B981', 'Early Exposure': '#84CC16',
+    'Emerging Dependency': '#F59E0B', 'Structural Bottleneck': '#F97316',
     'Organizational Drag': '#EF4444',
   };
-  const atRisk = (riskBuckets['Structural bottleneck'] ?? 0) + (riskBuckets['Organizational risk'] ?? 0);
+  const cColors: Record<string, string> = {
+    'Healthy Distribution': '#10B981', 'Early Exposure': '#84CC16',
+    'Emerging Dependency': '#F59E0B', 'Structural Bottleneck': '#F97316',
+    'Organizational Drag': '#EF4444',
+  };
+  const atRisk = (riskBuckets['Structural Bottleneck'] ?? 0) + (riskBuckets['Organizational Drag'] ?? 0);
   const errorParam = '';
 
   // ── Portfolio Risk Distribution percentages
@@ -405,6 +433,25 @@ function orgPage(
     </div>
   </div>
 
+  <!-- ═══ STRUCTURAL TELEMETRY LAYER™ — PORTFOLIO VIEW ═══ -->
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 bg-violet-600 rounded-xl flex items-center justify-center">
+          <i class="fas fa-satellite-dish text-white text-sm"></i>
+        </div>
+        <div>
+          <h2 class="text-sm font-bold text-slate-800">Structural Telemetry Layer™</h2>
+          <p class="text-xs text-slate-400">Optional operational metadata calibration · enterprise connectors</p>
+        </div>
+      </div>
+      <span class="text-xs text-slate-400">${telRows.filter(r => r.tli !== null).length} of ${telRows.length} leaders connected</span>
+    </div>
+    <div class="p-5">
+      ${renderOrgTelemetrySummary(telRows, avgTLI, avgTCI, avgRPI)}
+    </div>
+  </div>
+
   <!-- ═══ DECISION GRAVITY MAP + PORTFOLIO RISK DISTRIBUTION ═══ -->
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
@@ -423,11 +470,11 @@ function orgPage(
       <!-- Legend -->
       <div class="mt-3 flex flex-wrap gap-3 text-xs">
         ${[
-          { color: '#10B981', label: 'Low structural risk' },
-          { color: '#84CC16', label: 'Early exposure' },
-          { color: '#F59E0B', label: 'Emerging dependency' },
-          { color: '#F97316', label: 'Structural bottleneck' },
-          { color: '#EF4444', label: 'Organizational risk' },
+          { color: '#10B981', label: 'Low Structural Risk' },
+          { color: '#84CC16', label: 'Early Exposure' },
+          { color: '#F59E0B', label: 'Emerging Dependency' },
+          { color: '#F97316', label: 'Structural Bottleneck' },
+          { color: '#EF4444', label: 'Organizational Drag' },
         ].map(l => `
         <div class="flex items-center gap-1.5">
           <div class="w-3 h-3 rounded-full" style="background:${l.color}"></div>
@@ -831,9 +878,9 @@ if (rDistCtx) {
       datasets: [{
         data: ${JSON.stringify(Object.values(riskBuckets))},
         backgroundColor: ${JSON.stringify(Object.keys(riskBuckets).map(k => ({
-          'Low structural risk': '#10B981', 'Early exposure': '#84CC16',
-          'Emerging dependency': '#F59E0B', 'Structural bottleneck': '#F97316',
-          'Organizational risk': '#EF4444',
+          'Low Structural Risk': '#10B981', 'Early Exposure': '#84CC16',
+          'Emerging Dependency': '#F59E0B', 'Structural Bottleneck': '#F97316',
+          'Organizational Drag': '#EF4444',
         }[k] ?? '#CBD5E1')))},
         borderWidth: 0,
       }]
@@ -851,9 +898,9 @@ if (rDistCtx) {
 function leaderDetailPage(leader: Record<string, unknown>, assessments: Record<string, unknown>[]): string {
   const latest = assessments[0];
   const rColors: Record<string, string> = {
-    'Low structural risk': '#10B981', 'Early exposure': '#84CC16',
-    'Emerging dependency': '#F59E0B', 'Structural bottleneck': '#F97316',
-    'Organizational risk': '#EF4444',
+    'Low Structural Risk': '#10B981', 'Early Exposure': '#84CC16',
+    'Emerging Dependency': '#F59E0B', 'Structural Bottleneck': '#F97316',
+    'Organizational Drag': '#EF4444',
   };
 
   const histRows = assessments.map((a, i) => {

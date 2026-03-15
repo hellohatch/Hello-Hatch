@@ -107,8 +107,8 @@ api.post('/risk/calculate', async (c) => {
   }
 
   const cei = computeCEI(cei_leader_decisions ?? 38, cei_total_decisions ?? 100);
-  const { stage: cascade_stage, level: cascade_level, stageMeta } = computeCascadeStage(cei);
   const risk_score = computeRiskScore(lsi, lli_norm, cei);
+  const { stage: cascade_stage, level: cascade_level, stageMeta } = computeCascadeStage(risk_score);
   const risk_level = classifyRiskLevel(risk_score);
   const trajectory = computeTrajectory(risk_score, body.historical_scores ?? []);
 
@@ -125,11 +125,11 @@ api.post('/risk/calculate', async (c) => {
     cascade_description: stageMeta.description,
     cascade_basis: 'Risk Score (v3.1 — not CEI alone)',
     risk_bands: [
-      { range: '0.000–0.030', level: 'Low structural risk',   cascade: 'Healthy Distribution' },
-      { range: '0.031–0.080', level: 'Early exposure',        cascade: 'Emerging Exposure' },
-      { range: '0.081–0.150', level: 'Emerging dependency',  cascade: 'Structural Dependency' },
-      { range: '0.151–0.300', level: 'Structural bottleneck', cascade: 'Decision Bottleneck' },
-      { range: '>0.300',      level: 'Organizational risk',  cascade: 'Organizational Drag' },
+      { range: '< 0.030',     level: 'Low Structural Risk',  cascade: 'Healthy Distribution' },
+      { range: '0.030–0.080', level: 'Early Exposure',       cascade: 'Early Exposure' },
+      { range: '0.080–0.150', level: 'Emerging Dependency',  cascade: 'Emerging Dependency' },
+      { range: '0.150–0.300', level: 'Structural Bottleneck', cascade: 'Structural Bottleneck' },
+      { range: '> 0.300',     level: 'Organizational Drag',  cascade: 'Organizational Drag' },
     ],
   });
 });
@@ -280,7 +280,7 @@ api.get('/org/portfolio', requireAuth, async (c) => {
     portfolio_metrics: {
       avg_risk_score: avgRisk ? parseFloat(avgRisk.toFixed(4)) : null,
       avg_lsi:        avgLSI  ? parseFloat(avgLSI.toFixed(3))  : null,
-      at_risk_count:  (riskDistribution['Structural bottleneck'] ?? 0) + (riskDistribution['Organizational risk'] ?? 0),
+      at_risk_count:  (riskDistribution['Structural Bottleneck'] ?? 0) + (riskDistribution['Organizational Drag'] ?? 0),
     },
     risk_distribution:    riskDistribution,
     cascade_distribution: cascadeDistribution,

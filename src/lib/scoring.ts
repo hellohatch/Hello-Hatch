@@ -136,44 +136,47 @@ export const RISK_LEVELS: Array<{
   description: string;
 }> = [
   {
-    level: 'Low structural risk',
+    level: 'Low Structural Risk',
     range: [0, 0.030],
     color: '#10B981', bg: '#ECFDF5', textColor: '#065F46',
     description: 'Leadership signals are strong and structural load is well-managed. No intervention required.',
   },
   {
-    level: 'Early exposure',
-    range: [0.031, 0.080],
+    level: 'Early Exposure',
+    range: [0.030, 0.080],
     color: '#84CC16', bg: '#F7FEE7', textColor: '#365314',
     description: 'Early risk indicators are present. Preventative attention is warranted.',
   },
   {
-    level: 'Emerging dependency',
-    range: [0.081, 0.150],
+    level: 'Emerging Dependency',
+    range: [0.080, 0.150],
     color: '#F59E0B', bg: '#FFFBEB', textColor: '#78350F',
     description: 'Structural dependency is forming. Active monitoring and load management recommended.',
   },
   {
-    level: 'Structural bottleneck',
-    range: [0.151, 0.300],
+    level: 'Structural Bottleneck',
+    range: [0.150, 0.300],
     color: '#F97316', bg: '#FFF7ED', textColor: '#7C2D12',
     description: 'Decision throughput and organizational velocity are materially compromised.',
   },
   {
-    level: 'Organizational risk',
-    range: [0.301, 999],
+    level: 'Organizational Drag',
+    range: [0.300, 999],
     color: '#EF4444', bg: '#FEF2F2', textColor: '#7F1D1D',
     description: 'Acute structural risk. Urgent intervention required. The risk is organizational, not personal.',
   },
 ];
 
 export function classifyRiskLevel(riskScore: number): RiskLevel {
-  const match = RISK_LEVELS.find(r => riskScore >= r.range[0] && riskScore <= r.range[1]);
-  return match?.level ?? 'Organizational risk';
+  if (riskScore < 0.030) return 'Low Structural Risk';
+  if (riskScore < 0.080) return 'Early Exposure';
+  if (riskScore < 0.150) return 'Emerging Dependency';
+  if (riskScore < 0.300) return 'Structural Bottleneck';
+  return 'Organizational Drag';
 }
 
 export function getRiskLevelMeta(riskScore: number) {
-  return RISK_LEVELS.find(r => riskScore >= r.range[0] && riskScore <= r.range[1])
+  return RISK_LEVELS.find(r => riskScore >= r.range[0] && riskScore < r.range[1])
     ?? RISK_LEVELS[RISK_LEVELS.length - 1];
 }
 
@@ -206,24 +209,24 @@ export const CASCADE_STAGES: Array<{
   },
   {
     level: 2,
-    stage: 'Emerging Exposure',
-    riskRange: [0.031, 0.080],
+    stage: 'Early Exposure',
+    riskRange: [0.030, 0.080],
     color: '#84CC16', bg: '#F7FEE7', textColor: '#365314',
     description: 'Early concentration signals appearing. Preventative attention is warranted.',
     action: 'Review decision routing patterns. Begin documenting escalation triggers.',
   },
   {
     level: 3,
-    stage: 'Structural Dependency',
-    riskRange: [0.081, 0.150],
+    stage: 'Emerging Dependency',
+    riskRange: [0.080, 0.150],
     color: '#F59E0B', bg: '#FFFBEB', textColor: '#78350F',
     description: 'Organization is structurally dependent on this leader for decision resolution.',
     action: 'Initiate delegation architecture review. Map top 10 decision categories for redistribution.',
   },
   {
     level: 4,
-    stage: 'Decision Bottleneck',
-    riskRange: [0.151, 0.300],
+    stage: 'Structural Bottleneck',
+    riskRange: [0.150, 0.300],
     color: '#F97316', bg: '#FFF7ED', textColor: '#7C2D12',
     description: 'Decision throughput is critically constrained. Organizational velocity is compromised.',
     action: 'Immediate structural intervention. Implement decision rights framework within 30 days.',
@@ -231,7 +234,7 @@ export const CASCADE_STAGES: Array<{
   {
     level: 5,
     stage: 'Organizational Drag',
-    riskRange: [0.301, 999],
+    riskRange: [0.300, 999],
     color: '#EF4444', bg: '#FEF2F2', textColor: '#7F1D1D',
     description: 'Risk Score indicates systemic structural failure. Organizational performance is at acute risk.',
     action: 'Urgent advisory engagement. Load reduction, succession, and structural redesign are required immediately.',
@@ -244,7 +247,7 @@ export function computeCascadeStage(riskScore: number): {
   stageMeta: typeof CASCADE_STAGES[0];
 } {
   const stageMeta = CASCADE_STAGES.find(
-    s => riskScore >= s.riskRange[0] && riskScore <= s.riskRange[1]
+    s => riskScore >= s.riskRange[0] && riskScore < s.riskRange[1]
   ) ?? CASCADE_STAGES[CASCADE_STAGES.length - 1];
   return { stage: stageMeta.stage, level: stageMeta.level, stageMeta };
 }

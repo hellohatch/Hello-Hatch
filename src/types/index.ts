@@ -1,10 +1,10 @@
-// Leadership Risk Intelligence™ — Core Types (v3.2 — Structural Intervention Engine™)
+// Leadership Risk Intelligence™ — Core Types (v3.2 — Telemetry Architecture)
 
 export type CascadeStage =
   | 'Healthy Distribution'
-  | 'Emerging Exposure'
-  | 'Structural Dependency'
-  | 'Decision Bottleneck'
+  | 'Early Exposure'
+  | 'Emerging Dependency'
+  | 'Structural Bottleneck'
   | 'Organizational Drag';
 
 export type SignalPattern =
@@ -14,11 +14,11 @@ export type SignalPattern =
   | 'Leadership Load Saturation';
 
 export type RiskLevel =
-  | 'Low structural risk'
-  | 'Early exposure'
-  | 'Emerging dependency'
-  | 'Structural bottleneck'
-  | 'Organizational risk';
+  | 'Low Structural Risk'
+  | 'Early Exposure'
+  | 'Emerging Dependency'
+  | 'Structural Bottleneck'
+  | 'Organizational Drag';
 
 export type TrajectoryDirection = 'Improving' | 'Stable' | 'Declining';
 

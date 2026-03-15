@@ -258,7 +258,7 @@ function renderProjectionChart(projections: RiskProjection[]): string {
             callbacks: {
               label: function(ctx) {
                 const val = ctx.parsed.y;
-                const band = val <= 0.030 ? 'Low' : val <= 0.080 ? 'Early' : val <= 0.150 ? 'Emerging' : val <= 0.300 ? 'Bottleneck' : 'Org Risk';
+                const band = val < 0.030 ? 'Low' : val < 0.080 ? 'Early Exposure' : val < 0.150 ? 'Emerging Dependency' : val < 0.300 ? 'Structural Bottleneck' : 'Org Drag';
                 return ctx.dataset.label + ': ' + val.toFixed(3) + ' (' + band + ')';
               }
             }

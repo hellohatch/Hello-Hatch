@@ -7,6 +7,8 @@ import { QUESTIONS, DOMAIN_META, DOMAIN_KEYS, LOAD_QUESTIONS, ORIENTATION_Q } fr
 import { computeFullRiskScore } from '../lib/scoring.js';
 import { generateBriefHTML } from '../lib/brief.js';
 import { computeInterventions } from '../lib/interventions.js';
+import { computeTelemetry } from '../lib/telemetry.js';
+import { computeFusion } from '../lib/fusion.js';
 
 const assessment = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 assessment.use('*', requireAuth);
@@ -123,6 +125,7 @@ assessment.post('/:id/submit', async (c) => {
 assessment.get('/:id/brief', async (c) => {
   const leaderId     = c.get('leaderId');
   const leaderName   = c.get('leaderName');
+  const orgId        = c.get('orgId');
   const assessmentId = parseInt(c.req.param('id'));
 
   const row = await c.env.DB.prepare(`
@@ -168,6 +171,37 @@ assessment.get('/:id/brief', async (c) => {
   // Run Structural Intervention Engine™
   const interventionReport = computeInterventions(scores, historicalScores);
 
+  // Run Structural Telemetry + Fusion (if telemetry exists)
+  const telSnap = await c.env.DB.prepare(`
+    SELECT * FROM telemetry_snapshots
+    WHERE leader_id=? AND organization_id=?
+    ORDER BY created_at DESC LIMIT 1
+  `).bind(leaderId, orgId).first();
+
+  const telResult = telSnap ? computeTelemetry({
+    meeting_hours_per_week:                (telSnap.meeting_hours_per_week as number)        ?? 20,
+    decision_approvals_per_week:           (telSnap.decision_approvals_per_week as number)   ?? 10,
+    cross_functional_meetings_pct:         (telSnap.cross_functional_meetings_pct as number) ?? 40,
+    recurring_meeting_hours_pct:           (telSnap.recurring_meeting_hours_pct as number)   ?? 50,
+    calendar_fragmentation_score:          (telSnap.calendar_fragmentation_score as number)  ?? 30,
+    approvals_requiring_this_leader_pct:   (telSnap.approvals_requiring_this_leader_pct as number) ?? 15,
+    escalation_frequency_per_week:         (telSnap.escalation_frequency_per_week as number) ?? 2,
+    decision_routing_dependencies:         (telSnap.decision_routing_dependencies as number) ?? 3,
+    cross_func_approval_concentration:     (telSnap.cross_func_approval_concentration as number) ?? 20,
+    active_projects_owned:                 (telSnap.active_projects_owned as number)         ?? 3,
+    functions_dependent_count:             (telSnap.functions_dependent_count as number)     ?? 2,
+    routing_dependency_breadth:            (telSnap.routing_dependency_breadth as number)    ?? 3,
+    single_point_of_failure_score:         (telSnap.single_point_of_failure_score as number) ?? 20,
+    weeks_sustained_overload:              (telSnap.weeks_sustained_overload as number)      ?? 1,
+    calendar_whitespace_pct:               (telSnap.calendar_whitespace_pct as number)       ?? 40,
+    after_hours_meetings_pct:              (telSnap.after_hours_meetings_pct as number)      ?? 10,
+    weekend_activity_days_per_month:       (telSnap.weekend_activity_days_per_month as number) ?? 0,
+    period_weeks:                          (telSnap.period_weeks as number)                  ?? 4,
+    data_completeness_pct:                 (telSnap.data_completeness_pct as number)         ?? 100,
+  }) : null;
+
+  const fusionResult = computeFusion(scores, telResult);
+
   return c.html(generateBriefHTML(
     row.name as string,
     row.org_name as string,
@@ -176,7 +210,8 @@ assessment.get('/:id/brief', async (c) => {
     row.future_orientation as string ?? '',
     row.completed_at as string,
     historicalScores,
-    interventionReport
+    interventionReport,
+    fusionResult
   ));
 });
 

@@ -1,4 +1,4 @@
-// Leader Dashboard — Personal Intelligence View (v3.2 — Structural Intervention Engine™)
+// Leader Dashboard — Personal Intelligence View (v3.2 — Telemetry Architecture)
 
 import { Hono } from 'hono';
 import type { Bindings, Variables } from '../types/index.js';
@@ -7,6 +7,9 @@ import { RISK_LEVELS, CASCADE_STAGES, SIGNAL_PATTERN_META } from '../lib/scoring
 import { DOMAIN_META, DOMAIN_KEYS } from '../lib/questions.js';
 import { computeInterventions } from '../lib/interventions.js';
 import { renderInterventionPanel } from '../lib/interventionUI.js';
+import { computeTelemetry } from '../lib/telemetry.js';
+import { computeFusion } from '../lib/fusion.js';
+import { renderLeaderTelemetryPanel } from '../lib/telemetryUI.js';
 
 const dashboard = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 dashboard.use('*', requireAuth);
@@ -60,8 +63,7 @@ dashboard.get('/', async (c) => {
   // ── Structural Intervention Engine™ ──
   // Build intervention report from latest assessment scores
   const historicalScores = (history.results ?? []).map(h => h.risk_score as number).slice(1); // exclude latest
-  const interventionReport = latest ? computeInterventions(
-    {
+  const assessmentScores = latest ? {
       stress_regulation:     latest.stress_regulation as number,
       cognitive_breadth:     latest.cognitive_breadth as number,
       trust_climate:         latest.trust_climate as number,
@@ -80,14 +82,50 @@ dashboard.get('/', async (c) => {
       risk_score:            latest.risk_score as number,
       risk_level:            latest.risk_level as any,
       trajectory_direction:  latest.trajectory_direction as any,
-    },
-    historicalScores
-  ) : null;
+    } : null;
+
+  const interventionReport = assessmentScores
+    ? computeInterventions(assessmentScores, historicalScores)
+    : null;
+
+  // ── Structural Telemetry Layer™ ──
+  // Fetch latest telemetry snapshot for fusion
+  const telSnap = await c.env.DB.prepare(`
+    SELECT * FROM telemetry_snapshots
+    WHERE leader_id=? AND organization_id=?
+    ORDER BY created_at DESC LIMIT 1
+  `).bind(leaderId, orgId).first();
+
+  const telResult = telSnap ? computeTelemetry({
+    meeting_hours_per_week:                (telSnap.meeting_hours_per_week as number)        ?? 20,
+    decision_approvals_per_week:           (telSnap.decision_approvals_per_week as number)   ?? 10,
+    cross_functional_meetings_pct:         (telSnap.cross_functional_meetings_pct as number) ?? 40,
+    recurring_meeting_hours_pct:           (telSnap.recurring_meeting_hours_pct as number)   ?? 50,
+    calendar_fragmentation_score:          (telSnap.calendar_fragmentation_score as number)  ?? 30,
+    approvals_requiring_this_leader_pct:   (telSnap.approvals_requiring_this_leader_pct as number) ?? 15,
+    escalation_frequency_per_week:         (telSnap.escalation_frequency_per_week as number) ?? 2,
+    decision_routing_dependencies:         (telSnap.decision_routing_dependencies as number) ?? 3,
+    cross_func_approval_concentration:     (telSnap.cross_func_approval_concentration as number) ?? 20,
+    active_projects_owned:                 (telSnap.active_projects_owned as number)         ?? 3,
+    functions_dependent_count:             (telSnap.functions_dependent_count as number)     ?? 2,
+    routing_dependency_breadth:            (telSnap.routing_dependency_breadth as number)    ?? 3,
+    single_point_of_failure_score:         (telSnap.single_point_of_failure_score as number) ?? 20,
+    weeks_sustained_overload:              (telSnap.weeks_sustained_overload as number)      ?? 1,
+    calendar_whitespace_pct:               (telSnap.calendar_whitespace_pct as number)       ?? 40,
+    after_hours_meetings_pct:              (telSnap.after_hours_meetings_pct as number)      ?? 10,
+    weekend_activity_days_per_month:       (telSnap.weekend_activity_days_per_month as number) ?? 0,
+    period_weeks:                          (telSnap.period_weeks as number)                  ?? 4,
+    data_completeness_pct:                 (telSnap.data_completeness_pct as number)         ?? 100,
+  }) : null;
+
+  const fusionResult = assessmentScores
+    ? computeFusion(assessmentScores, telResult)
+    : null;
 
   return c.html(dashboardPage(
     leaderName, latest, history.results ?? [], inProg?.assessment_id ?? null,
     decisions30d, orgTotal30d, velocity, ceiLive,
-    interventionReport
+    interventionReport, fusionResult, telResult
   ));
 });
 
@@ -101,21 +139,23 @@ function dashboardPage(
   orgTotal30d: number = 0,
   velocity: number = 0,
   ceiLive: number | null = null,
-  interventionReport: ReturnType<typeof computeInterventions> | null = null
+  interventionReport: ReturnType<typeof computeInterventions> | null = null,
+  fusionResult: ReturnType<typeof computeFusion> | null = null,
+  telResult: ReturnType<typeof computeTelemetry> | null = null
 ): string {
 
   const riskColors: Record<string, string> = {
-    'Low structural risk': '#10B981',
-    'Early exposure': '#84CC16',
-    'Emerging dependency': '#F59E0B',
-    'Structural bottleneck': '#F97316',
-    'Organizational risk': '#EF4444',
+    'Low Structural Risk': '#10B981',
+    'Early Exposure': '#84CC16',
+    'Emerging Dependency': '#F59E0B',
+    'Structural Bottleneck': '#F97316',
+    'Organizational Drag': '#EF4444',
   };
   const cascadeColors: Record<string, string> = {
     'Healthy Distribution': '#10B981',
-    'Emerging Exposure': '#84CC16',
-    'Structural Dependency': '#F59E0B',
-    'Decision Bottleneck': '#F97316',
+    'Early Exposure': '#84CC16',
+    'Emerging Dependency': '#F59E0B',
+    'Structural Bottleneck': '#F97316',
     'Organizational Drag': '#EF4444',
   };
 
@@ -330,6 +370,20 @@ function dashboardPage(
 
   <!-- ═══ STRUCTURAL INTERVENTION ENGINE™ ═══ -->
   ${interventionReport ? renderInterventionPanel(interventionReport, latest.assessment_id as number) : ''}
+
+  <!-- ═══ STRUCTURAL TELEMETRY LAYER™ ═══ -->
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+    <div class="flex items-center gap-3 mb-5">
+      <div class="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center">
+        <i class="fas fa-satellite-dish text-white text-sm"></i>
+      </div>
+      <div>
+        <h2 class="text-sm font-bold text-slate-900">Structural Telemetry Layer™</h2>
+        <p class="text-xs text-slate-400">Optional operational metadata calibration</p>
+      </div>
+    </div>
+    ${fusionResult ? renderLeaderTelemetryPanel(fusionResult, telResult) : renderLeaderTelemetryPanel({ mode: 'Assessment', telemetry_confidence: 0, assessment: { lli_norm: 0, cei: 0, lsi_norm: 0, risk_score: 0, risk_level: 'Low Structural Risk' as any, cascade_stage: 'Healthy Distribution' as any }, calibrated: { lli_norm: 0, cei: 0, lsi_norm: 0, risk_score: 0, risk_level: 'Low Structural Risk' as any, cascade_stage: 'Healthy Distribution' as any, cascade_level: 1, rpi: 0 }, divergence: { pattern: null, label: '', description: '', implication: '', color: '#94A3B8', icon: 'plug', severity: 'None', lli_divergence: 0, cei_divergence: 0, divergence_magnitude: 0 }, confidence: { overall: 0, label: 'Assessment Only', color: '#94A3B8', components: { telemetry_completeness: 0, signal_agreement: 0, period_coverage: 0 } }, telemetry: { tli: 0, tci: 0, rpi: 0, telemetry_composite: 0, data_confidence: 0, signal_completeness: 0 }, fusion_insight: '' }, null)}
+  </div>
 
   <!-- History Table -->
   <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
