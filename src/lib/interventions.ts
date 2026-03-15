@@ -540,7 +540,7 @@ function estimateCostOfInaction(
     return `High probability of next cascade stage ${timeframe}. At Organizational Drag, decision throughput compression typically reduces team execution velocity by 25–40%. Replacement and transition costs for senior roles average 1.5–2× annual compensation.`;
   }
   if (scores.risk_score >= 0.10) {
-    return `Emerging structural dependency will likely progress to Decision Bottleneck ${timeframe}. Organizations at this stage report 15–25% reduction in initiative delivery speed and elevated team turnover risk in direct reports.`;
+    return `Emerging structural dependency will likely progress to Structural Bottleneck ${timeframe}. Organizations at this stage report 15–25% reduction in initiative delivery speed and elevated team turnover risk in direct reports.`;
   }
   return `Early structural patterns, if unaddressed, compound over 60–90 days. Prevention cost is 10–20× lower than structural redesign after full escalation.`;
 }

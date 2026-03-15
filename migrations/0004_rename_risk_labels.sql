@@ -15,8 +15,6 @@ UPDATE risk_scores SET cascade_stage = 'Structural Bottleneck' WHERE cascade_sta
 
 -- Re-classify any rows that may have used old numeric thresholds (0.031 / 0.081 / 0.151 / 0.301)
 -- to the new open-interval boundaries (0.030 / 0.080 / 0.150 / 0.300).
--- In practice the values are continuous floats so boundary collisions are rare, but this
--- ensures correctness for any legacy exact-match edge cases.
 UPDATE risk_scores
 SET
   risk_level = CASE
@@ -41,3 +39,14 @@ SET
     ELSE 5
   END
 WHERE lsi IS NOT NULL AND lli_norm IS NOT NULL AND cei IS NOT NULL;
+
+-- ── fusion_results table (telemetry calibrated labels) ────────────────────────
+UPDATE fusion_results SET calibrated_risk_level = 'Low Structural Risk'   WHERE calibrated_risk_level = 'Low structural risk';
+UPDATE fusion_results SET calibrated_risk_level = 'Early Exposure'        WHERE calibrated_risk_level = 'Early exposure';
+UPDATE fusion_results SET calibrated_risk_level = 'Emerging Dependency'   WHERE calibrated_risk_level = 'Emerging dependency';
+UPDATE fusion_results SET calibrated_risk_level = 'Structural Bottleneck' WHERE calibrated_risk_level = 'Structural bottleneck';
+UPDATE fusion_results SET calibrated_risk_level = 'Organizational Drag'   WHERE calibrated_risk_level = 'Organizational risk';
+
+UPDATE fusion_results SET calibrated_cascade_stage = 'Early Exposure'        WHERE calibrated_cascade_stage = 'Emerging Exposure';
+UPDATE fusion_results SET calibrated_cascade_stage = 'Emerging Dependency'   WHERE calibrated_cascade_stage = 'Structural Dependency';
+UPDATE fusion_results SET calibrated_cascade_stage = 'Structural Bottleneck' WHERE calibrated_cascade_stage = 'Decision Bottleneck';

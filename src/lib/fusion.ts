@@ -316,11 +316,11 @@ function computeFusionConfidence(
 // ───────────────────────────────────────────────
 
 function classifyRiskFromScore(score: number): { risk_level: RiskLevel; cascade_stage: CascadeStage; cascade_level: number } {
-  if (score <= 0.030) return { risk_level: 'Low structural risk',  cascade_stage: 'Healthy Distribution',  cascade_level: 1 };
-  if (score <= 0.080) return { risk_level: 'Early exposure',       cascade_stage: 'Emerging Exposure',      cascade_level: 2 };
-  if (score <= 0.150) return { risk_level: 'Emerging dependency',  cascade_stage: 'Structural Dependency',  cascade_level: 3 };
-  if (score <= 0.300) return { risk_level: 'Structural bottleneck',cascade_stage: 'Decision Bottleneck',    cascade_level: 4 };
-  return              { risk_level: 'Organizational risk',         cascade_stage: 'Organizational Drag',    cascade_level: 5 };
+  if (score < 0.030) return { risk_level: 'Low Structural Risk',  cascade_stage: 'Healthy Distribution',  cascade_level: 1 };
+  if (score < 0.080) return { risk_level: 'Early Exposure',       cascade_stage: 'Early Exposure',         cascade_level: 2 };
+  if (score < 0.150) return { risk_level: 'Emerging Dependency',  cascade_stage: 'Emerging Dependency',    cascade_level: 3 };
+  if (score < 0.300) return { risk_level: 'Structural Bottleneck',cascade_stage: 'Structural Bottleneck',  cascade_level: 4 };
+  return              { risk_level: 'Organizational Drag',         cascade_stage: 'Organizational Drag',    cascade_level: 5 };
 }
 
 // ───────────────────────────────────────────────

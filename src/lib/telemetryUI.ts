@@ -147,11 +147,11 @@ export function renderCalibratedRiskPanel(fusion: CalibratedRiskResult): string 
 
   const delta     = computeRiskDelta(fusion.assessment.risk_score, fusion.calibrated.risk_score);
   const riskColors: Record<string, string> = {
-    'Low structural risk':  '#10B981',
-    'Early exposure':       '#84CC16',
-    'Emerging dependency':  '#F59E0B',
-    'Structural bottleneck':'#F97316',
-    'Organizational risk':  '#EF4444',
+    'Low Structural Risk':  '#10B981',
+    'Early Exposure':       '#84CC16',
+    'Emerging Dependency':  '#F59E0B',
+    'Structural Bottleneck':'#F97316',
+    'Organizational Drag':  '#EF4444',
   };
   const assColor  = riskColors[fusion.assessment.risk_level] ?? '#94A3B8';
   const calColor  = riskColors[fusion.calibrated.risk_level] ?? '#94A3B8';
