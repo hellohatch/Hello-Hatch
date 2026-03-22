@@ -18,6 +18,9 @@ dashboard.get('/', async (c) => {
   const leaderId   = c.get('leaderId');
   const leaderName = c.get('leaderName');
   const orgId      = c.get('orgId');
+  const role       = c.get('leaderRole');
+  if (role === 'hatch_admin') return c.redirect('/hatch-admin');
+  if (role === 'admin')       return c.redirect('/org');
 
   // Latest completed assessment
   const latest = await c.env.DB.prepare(`

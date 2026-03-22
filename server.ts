@@ -16,6 +16,7 @@ import dashboard    from './src/routes/dashboard.js';
 import org          from './src/routes/org.js';
 import apiRoutes, { formulasHandler } from './src/routes/api.js';
 import telemetryRoutes from './src/routes/telemetry.js';
+import hatchAdminRoutes from './src/routes/hatch_admin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
@@ -133,6 +134,7 @@ app.route('/',              auth);
 app.route('/assessment',    assessment);
 app.route('/dashboard',     dashboard);
 app.route('/org',           org);
+app.route('/hatch-admin',   hatchAdminRoutes);
 app.route('/api',           apiRoutes);
 app.route('/api/telemetry', telemetryRoutes);
 
