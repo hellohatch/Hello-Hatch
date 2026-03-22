@@ -53,3 +53,37 @@ export async function requireAuth(
   c.set('leaderName', payload.name      as string);
   await next();
 }
+
+export async function requireHatchAdmin(
+  c: Context<{ Bindings: Bindings; Variables: Variables }>,
+  next: () => Promise<void>
+): Promise<Response | void> {
+  const token = getSession(c);
+  if (!token) return c.redirect('/login');
+  const payload = decodeToken(token);
+  if (!payload?.leaderId) return c.redirect('/login');
+  if (Date.now() - (payload.iat as number) > 86_400_000) return c.redirect('/login');
+  if (payload.role !== 'hatch_admin') return c.redirect('/login?error=Access+denied');
+  c.set('leaderId',   payload.leaderId  as number);
+  c.set('orgId',      payload.orgId     as number);
+  c.set('leaderRole', payload.role      as string);
+  c.set('leaderName', payload.name      as string);
+  await next();
+}
+
+export async function requireOrgAdmin(
+  c: Context<{ Bindings: Bindings; Variables: Variables }>,
+  next: () => Promise<void>
+): Promise<Response | void> {
+  const token = getSession(c);
+  if (!token) return c.redirect('/login');
+  const payload = decodeToken(token);
+  if (!payload?.leaderId) return c.redirect('/login');
+  if (Date.now() - (payload.iat as number) > 86_400_000) return c.redirect('/login');
+  if (payload.role !== 'admin' && payload.role !== 'hatch_admin') return c.redirect('/dashboard?error=Admin+access+required');
+  c.set('leaderId',   payload.leaderId  as number);
+  c.set('orgId',      payload.orgId     as number);
+  c.set('leaderRole', payload.role      as string);
+  c.set('leaderName', payload.name      as string);
+  await next();
+}

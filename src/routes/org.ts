@@ -5,7 +5,7 @@
 
 import { Hono } from 'hono';
 import type { Bindings, Variables } from '../types/index.js';
-import { requireAuth } from '../lib/auth.js';
+import { requireAuth, requireOrgAdmin } from '../lib/auth.js';
 import { hashPassword } from '../lib/auth.js';
 import { CASCADE_STAGES, RISK_LEVELS, SIGNAL_PATTERN_META } from '../lib/scoring.js';
 import { DOMAIN_META, DOMAIN_KEYS } from '../lib/questions.js';
@@ -14,7 +14,7 @@ import { renderOrgInterventionSummary } from '../lib/interventionUI.js';
 import { renderOrgTelemetrySummary } from '../lib/telemetryUI.js';
 
 const org = new Hono<{ Bindings: Bindings; Variables: Variables }>();
-org.use('*', requireAuth);
+org.use('*', requireOrgAdmin);
 
 // ── GET /org ── Portfolio Overview
 org.get('/', async (c) => {
@@ -165,20 +165,84 @@ org.post('/add-leader', async (c) => {
   if (leaderRole !== 'admin') return c.redirect('/org');
 
   const body = await c.req.parseBody();
-  const name      = (body.name      as string)?.trim();
-  const email     = (body.email     as string)?.toLowerCase().trim();
-  const roleLevel = body.role_level as string;
+  const name       = (body.name        as string)?.trim();
+  const email      = (body.email       as string)?.toLowerCase().trim();
+  const roleLevel  = body.role_level   as string;
+  const systemRole = (body.system_role as string) === 'admin' ? 'admin' : 'leader';
+  const password   = (body.password    as string)?.trim() || 'Welcome2026!';
 
   if (!name || !email) return c.redirect('/org?error=Name+and+email+required');
+  if (password.length < 8) return c.redirect('/org?error=Password+must+be+at+least+8+characters');
   const exists = await c.env.DB.prepare('SELECT leader_id FROM leaders WHERE email=?').bind(email).first();
   if (exists) return c.redirect('/org?error=Email+already+registered');
 
-  const hash = await hashPassword('Welcome2026!');
+  const hash = await hashPassword(password);
   await c.env.DB.prepare(
     'INSERT INTO leaders (organization_id,name,email,role_level,system_role,password_hash) VALUES (?,?,?,?,?,?)'
-  ).bind(orgId, name, email, roleLevel ?? 'Director', 'leader', hash).run();
+  ).bind(orgId, name, email, roleLevel ?? 'Director', systemRole, hash).run();
 
-  return c.redirect('/org?success=Leader+added');
+  return c.redirect('/org?success=User+added+successfully');
+});
+
+// ── GET /org/team ── Team members management page
+org.get('/team', async (c) => {
+  const orgId      = c.get('orgId');
+  const leaderRole = c.get('leaderRole');
+  const adminName  = c.get('leaderName');
+  if (leaderRole !== 'admin') return c.redirect('/org');
+
+  const members = (await c.env.DB.prepare(
+    'SELECT leader_id, name, email, role_level, system_role, created_at FROM leaders WHERE organization_id=? ORDER BY system_role DESC, name ASC'
+  ).bind(orgId).all()).results as Array<{ leader_id:number; name:string; email:string; role_level:string; system_role:string; created_at:string }>;
+
+  return c.html(teamPage(members, adminName, c.req.query('error'), c.req.query('success')));
+});
+
+// ── POST /org/team/remove ──
+org.post('/team/remove', async (c) => {
+  const orgId      = c.get('orgId');
+  const myId       = c.get('leaderId');
+  const leaderRole = c.get('leaderRole');
+  if (leaderRole !== 'admin') return c.redirect('/org/team');
+
+  const body     = await c.req.parseBody();
+  const targetId = parseInt(body.leader_id as string);
+  if (targetId === myId) return c.redirect('/org/team?error=Cannot+remove+yourself');
+
+  await c.env.DB.prepare('DELETE FROM leaders WHERE leader_id=? AND organization_id=?').bind(targetId, orgId).run();
+  return c.redirect('/org/team?success=User+removed');
+});
+
+// ── POST /org/team/change-role ──
+org.post('/team/change-role', async (c) => {
+  const orgId      = c.get('orgId');
+  const myId       = c.get('leaderId');
+  const leaderRole = c.get('leaderRole');
+  if (leaderRole !== 'admin') return c.redirect('/org/team');
+
+  const body       = await c.req.parseBody();
+  const targetId   = parseInt(body.leader_id as string);
+  const systemRole = (body.system_role as string) === 'admin' ? 'admin' : 'leader';
+  if (targetId === myId) return c.redirect('/org/team?error=Cannot+change+your+own+role');
+
+  await c.env.DB.prepare('UPDATE leaders SET system_role=? WHERE leader_id=? AND organization_id=?').bind(systemRole, targetId, orgId).run();
+  return c.redirect('/org/team?success=Role+updated');
+});
+
+// ── POST /org/team/reset-password ──
+org.post('/team/reset-password', async (c) => {
+  const orgId      = c.get('orgId');
+  const leaderRole = c.get('leaderRole');
+  if (leaderRole !== 'admin') return c.redirect('/org/team');
+
+  const body      = await c.req.parseBody();
+  const targetId  = parseInt(body.leader_id as string);
+  const password  = (body.password as string)?.trim();
+  if (!password || password.length < 8) return c.redirect('/org/team?error=Password+must+be+at+least+8+characters');
+
+  const hash = await hashPassword(password);
+  await c.env.DB.prepare('UPDATE leaders SET password_hash=? WHERE leader_id=? AND organization_id=?').bind(hash, targetId, orgId).run();
+  return c.redirect('/org/team?success=Password+updated');
 });
 
 // ── GET /org/leader/:id ── Individual leader deep dive
@@ -352,6 +416,7 @@ function orgPage(
     <div class="flex items-center gap-4">
       <a href="/dashboard" class="text-xs text-slate-400 hover:text-slate-700">My Dashboard</a>
       <a href="/api/docs" class="text-xs text-slate-400 hover:text-slate-700">API</a>
+      ${adminRole === 'admin' ? `<a href="/org/team" class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold"><i class="fas fa-users mr-1"></i>Manage Team</a>` : ''}
       <span class="text-xs text-slate-500">${adminName}</span>
       <a href="/logout" class="text-xs text-slate-400 hover:text-red-600"><i class="fas fa-sign-out-alt"></i></a>
     </div>
@@ -703,15 +768,15 @@ function orgPage(
 
 </div>
 
-<!-- Add Leader Modal -->
+<!-- Add User Modal -->
 ${adminRole === 'admin' ? `
 <div id="addModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
   <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
     <div class="flex items-center justify-between mb-5">
-      <h3 class="font-bold text-slate-900">Add Leader to Portfolio</h3>
+      <h3 class="font-bold text-slate-900">Add User</h3>
       <button onclick="document.getElementById('addModal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button>
     </div>
-    <form method="POST" action="/org/add-leader" class="space-y-4">
+    <form method="POST" action="/org/add-leader" class="space-y-3">
       <div>
         <label class="text-xs font-medium text-slate-700 block mb-1.5">Full name</label>
         <input type="text" name="name" required class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500" placeholder="Jane Smith">
@@ -721,18 +786,27 @@ ${adminRole === 'admin' ? `
         <input type="email" name="email" required class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500" placeholder="jane@company.com">
       </div>
       <div>
-        <label class="text-xs font-medium text-slate-700 block mb-1.5">Role level</label>
+        <label class="text-xs font-medium text-slate-700 block mb-1.5">Platform role</label>
+        <select name="system_role" class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500">
+          <option value="leader">Leader (can do assessments)</option>
+          <option value="admin">Admin (full access)</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-700 block mb-1.5">Job title / level</label>
         <select name="role_level" class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500">
           <option>C-Suite / Founder</option><option>VP / SVP</option>
           <option>Director</option><option>Senior Manager</option><option>Manager</option>
         </select>
       </div>
-      <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
-        <i class="fas fa-info-circle mr-1"></i>Default password: <strong>Welcome2026!</strong>
+      <div>
+        <label class="text-xs font-medium text-slate-700 block mb-1.5">Temporary password</label>
+        <input type="text" name="password" class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500" placeholder="Welcome2026! (default)">
+        <p class="text-xs text-slate-400 mt-1">Leave blank to use default: Welcome2026!</p>
       </div>
-      <div class="flex gap-3">
+      <div class="flex gap-3 pt-1">
         <button type="button" onclick="document.getElementById('addModal').classList.add('hidden')" class="flex-1 border border-slate-300 text-slate-600 font-medium py-2.5 rounded-xl text-sm">Cancel</button>
-        <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-xl text-sm">Add Leader</button>
+        <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-xl text-sm">Add User</button>
       </div>
     </form>
   </div>
@@ -1033,6 +1107,219 @@ if (rr) new Chart(rr, {
   },
   options: { responsive:true, scales:{r:{min:0,max:5,ticks:{stepSize:1,font:{size:8}},grid:{color:'#E2E8F0'},pointLabels:{font:{size:8}}}}, plugins:{legend:{display:false}} }
 });` : ''}
+</script>
+</body></html>`;
+}
+
+// ── Team Management Page ──
+function teamPage(
+  members: Array<{ leader_id:number; name:string; email:string; role_level:string; system_role:string; created_at:string }>,
+  adminName: string,
+  error?: string,
+  success?: string
+): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Manage Team — LRI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-slate-50 min-h-screen font-sans">
+
+<nav class="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between">
+  <div class="flex items-center gap-2">
+    <a href="/org" class="text-slate-400 hover:text-slate-600 text-sm"><i class="fas fa-arrow-left mr-1"></i>Portfolio</a>
+    <span class="text-slate-300 mx-1">/</span>
+    <span class="font-bold text-slate-900 text-sm">Manage Team</span>
+  </div>
+  <div class="flex items-center gap-4">
+    <span class="text-xs text-slate-500">${adminName}</span>
+    <a href="/logout" class="text-xs text-slate-400 hover:text-red-600"><i class="fas fa-sign-out-alt"></i></a>
+  </div>
+</nav>
+
+<div class="max-w-4xl mx-auto px-4 py-8">
+
+  ${error ? `<div class="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 mb-5 text-sm"><i class="fas fa-circle-exclamation mr-2"></i>${decodeURIComponent(error)}</div>` : ''}
+  ${success ? `<div class="bg-green-50 border border-green-200 text-green-700 rounded-xl px-4 py-3 mb-5 text-sm"><i class="fas fa-circle-check mr-2"></i>${decodeURIComponent(success)}</div>` : ''}
+
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-xl font-bold text-slate-900">Team Members</h1>
+      <p class="text-sm text-slate-500 mt-1">${members.length} user${members.length !== 1 ? 's' : ''} in your organization</p>
+    </div>
+    <button onclick="document.getElementById('addModal').classList.remove('hidden')"
+      class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl flex items-center gap-2">
+      <i class="fas fa-plus"></i> Add User
+    </button>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+    <table class="w-full">
+      <thead>
+        <tr class="border-b border-slate-100 bg-slate-50">
+          <th class="text-left px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Name</th>
+          <th class="text-left px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Email</th>
+          <th class="text-left px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Job Level</th>
+          <th class="text-left px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Platform Role</th>
+          <th class="text-left px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        ${members.map(m => `
+        <tr class="hover:bg-slate-50">
+          <td class="px-5 py-4">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold ${m.system_role === 'admin' ? 'bg-indigo-600' : 'bg-slate-400'}">
+                ${m.name.charAt(0).toUpperCase()}
+              </div>
+              <span class="text-sm font-medium text-slate-900">${m.name}</span>
+            </div>
+          </td>
+          <td class="px-5 py-4 text-sm text-slate-600">${m.email}</td>
+          <td class="px-5 py-4 text-sm text-slate-600">${m.role_level}</td>
+          <td class="px-5 py-4">
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${m.system_role === 'admin' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}">
+              <i class="fas ${m.system_role === 'admin' ? 'fa-shield-halved' : 'fa-user'} mr-1"></i>
+              ${m.system_role === 'admin' ? 'Admin' : 'Leader'}
+            </span>
+          </td>
+          <td class="px-5 py-4">
+            <div class="flex items-center gap-2">
+              <button onclick="openRoleModal(${m.leader_id},'${m.name.replace(/'/g,"\\'")}','${m.system_role}')"
+                class="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded-lg hover:bg-indigo-50">
+                <i class="fas fa-user-gear mr-1"></i>Role
+              </button>
+              <button onclick="openPasswordModal(${m.leader_id},'${m.name.replace(/'/g,"\\'")}' )"
+                class="text-xs text-amber-600 hover:text-amber-800 font-medium px-2 py-1 rounded-lg hover:bg-amber-50">
+                <i class="fas fa-key mr-1"></i>Password
+              </button>
+              <button onclick="openRemoveModal(${m.leader_id},'${m.name.replace(/'/g,"\\'")}' )"
+                class="text-xs text-red-500 hover:text-red-700 font-medium px-2 py-1 rounded-lg hover:bg-red-50">
+                <i class="fas fa-trash mr-1"></i>Remove
+              </button>
+            </div>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    ${members.length === 0 ? '<div class="text-center py-12 text-slate-400"><i class="fas fa-users text-3xl mb-3 block"></i>No team members yet</div>' : ''}
+  </div>
+</div>
+
+<!-- Add User Modal -->
+<div id="addModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+    <div class="flex items-center justify-between mb-5">
+      <h3 class="font-bold text-slate-900">Add New User</h3>
+      <button onclick="document.getElementById('addModal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button>
+    </div>
+    <form method="POST" action="/org/add-leader" class="space-y-3">
+      <div>
+        <label class="text-xs font-medium text-slate-700 block mb-1.5">Full name</label>
+        <input type="text" name="name" required class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 text-slate-900" placeholder="Jane Smith">
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-700 block mb-1.5">Email</label>
+        <input type="email" name="email" required class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 text-slate-900" placeholder="jane@company.com">
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-700 block mb-1.5">Platform role</label>
+        <select name="system_role" class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 text-slate-900">
+          <option value="leader">Leader — can complete assessments</option>
+          <option value="admin">Admin — full access</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-700 block mb-1.5">Job title / level</label>
+        <select name="role_level" class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 text-slate-900">
+          <option>C-Suite / Founder</option><option>VP / SVP</option>
+          <option selected>Director</option><option>Senior Manager</option><option>Manager</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-700 block mb-1.5">Temporary password</label>
+        <input type="text" name="password" class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 text-slate-900" placeholder="Welcome2026! (default if blank)">
+      </div>
+      <div class="flex gap-3 pt-1">
+        <button type="button" onclick="document.getElementById('addModal').classList.add('hidden')" class="flex-1 border border-slate-300 text-slate-600 font-medium py-2.5 rounded-xl text-sm">Cancel</button>
+        <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-xl text-sm">Add User</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Change Role Modal -->
+<div id="roleModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-6">
+    <h3 class="font-bold text-slate-900 mb-4">Change Role — <span id="roleModalName"></span></h3>
+    <form method="POST" action="/org/team/change-role" class="space-y-4">
+      <input type="hidden" name="leader_id" id="roleModalId">
+      <div>
+        <label class="text-xs font-medium text-slate-700 block mb-1.5">Platform role</label>
+        <select name="system_role" id="roleModalSelect" class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900">
+          <option value="leader">Leader</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div class="flex gap-3">
+        <button type="button" onclick="document.getElementById('roleModal').classList.add('hidden')" class="flex-1 border border-slate-300 text-slate-600 font-medium py-2.5 rounded-xl text-sm">Cancel</button>
+        <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-xl text-sm">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Reset Password Modal -->
+<div id="passwordModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-6">
+    <h3 class="font-bold text-slate-900 mb-4">Reset Password — <span id="pwModalName"></span></h3>
+    <form method="POST" action="/org/team/reset-password" class="space-y-4">
+      <input type="hidden" name="leader_id" id="pwModalId">
+      <div>
+        <label class="text-xs font-medium text-slate-700 block mb-1.5">New password (min 8 chars)</label>
+        <input type="text" name="password" required minlength="8" class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900" placeholder="NewPassword123!">
+      </div>
+      <div class="flex gap-3">
+        <button type="button" onclick="document.getElementById('passwordModal').classList.add('hidden')" class="flex-1 border border-slate-300 text-slate-600 font-medium py-2.5 rounded-xl text-sm">Cancel</button>
+        <button type="submit" class="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-medium py-2.5 rounded-xl text-sm">Reset</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Remove User Modal -->
+<div id="removeModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-6">
+    <h3 class="font-bold text-slate-900 mb-2">Remove User</h3>
+    <p class="text-sm text-slate-600 mb-5">Are you sure you want to remove <strong id="removeModalName"></strong>? This cannot be undone.</p>
+    <form method="POST" action="/org/team/remove" class="flex gap-3">
+      <input type="hidden" name="leader_id" id="removeModalId">
+      <button type="button" onclick="document.getElementById('removeModal').classList.add('hidden')" class="flex-1 border border-slate-300 text-slate-600 font-medium py-2.5 rounded-xl text-sm">Cancel</button>
+      <button type="submit" class="flex-1 bg-red-500 hover:bg-red-600 text-white font-medium py-2.5 rounded-xl text-sm">Remove</button>
+    </form>
+  </div>
+</div>
+
+<script>
+function openRoleModal(id, name, currentRole) {
+  document.getElementById('roleModalId').value = id;
+  document.getElementById('roleModalName').textContent = name;
+  document.getElementById('roleModalSelect').value = currentRole;
+  document.getElementById('roleModal').classList.remove('hidden');
+}
+function openPasswordModal(id, name) {
+  document.getElementById('pwModalId').value = id;
+  document.getElementById('pwModalName').textContent = name;
+  document.getElementById('passwordModal').classList.remove('hidden');
+}
+function openRemoveModal(id, name) {
+  document.getElementById('removeModalId').value = id;
+  document.getElementById('removeModalName').textContent = name;
+  document.getElementById('removeModal').classList.remove('hidden');
+}
 </script>
 </body></html>`;
 }
